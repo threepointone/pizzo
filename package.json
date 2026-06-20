@@ -1,0 +1,40 @@
+{
+  "name": "pizzo",
+  "description": "Minimal Think chat agent on Cloudflare Workers",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "scripts": {
+    "start": "vite dev",
+    "dev": "vite dev",
+    "build": "vite build",
+    "deploy": "vite build && wrangler deploy",
+    "types": "think types --all"
+  },
+  "dependencies": {
+    "@cloudflare/ai-chat": "latest",
+    "@cloudflare/kumo": "^2.5.2",
+    "@cloudflare/think": "latest",
+    "@phosphor-icons/react": "^2.1.10",
+    "@streamdown/code": "^1.1.1",
+    "agents": "latest",
+    "ai": "^6.0.202",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "streamdown": "^2.5.0",
+    "workers-ai-provider": "^3.2.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.40.2",
+    "@cloudflare/workers-types": "^4.20260612.1",
+    "@tailwindcss/vite": "^4",
+    "@types/node": "^26.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "wrangler": "^4.100.0"
+  }
+}
