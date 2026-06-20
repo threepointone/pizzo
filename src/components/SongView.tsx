@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAgent } from "agents/react";
+import { Button, Text } from "@cloudflare/kumo";
 import { Workspace } from "./Workspace";
 import { ModularSurface } from "./ModularSurface";
 import { BeatMachine } from "./BeatMachine";
@@ -7,8 +8,10 @@ import { ChatPanel } from "./ChatPanel";
 import { engine } from "../audio/engine";
 import { modularEngine } from "../modular/engine";
 import { defaultSongState, songDocFromState, type SongState } from "../music/song";
+import { buildAutoSongDetails, buildSongSearchDoc } from "../music/search";
 import type { Patch } from "../modular/types";
 import type { ConnectionStatus } from "../client";
+import type { SongMeta } from "../../agents/studio/agent";
 
 /** Fill in fields a persisted (older) SongState may be missing. */
 function normalizeSong(next: Partial<SongState>): SongState {
@@ -27,6 +30,109 @@ function normalizeSong(next: Partial<SongState>): SongState {
 }
 
 type Surface = "chords" | "beats" | "modular";
+
+function SongDetails({
+  song,
+  onChange,
+  onRefreshChatSummary,
+}: {
+  song: SongMeta;
+  onChange: (patch: Partial<Pick<SongMeta, "title" | "description" | "tags">>) => void;
+  onRefreshChatSummary: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState(song.title);
+  const [description, setDescription] = useState(song.description);
+  const [tags, setTags] = useState(song.tags.join(", "));
+
+  useEffect(() => {
+    setTitle(song.title);
+    setDescription(song.description);
+    setTags(song.tags.join(", "));
+  }, [song.description, song.tags, song.title]);
+
+  const save = () => {
+    const nextTags = tags
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+    const patch: Partial<Pick<SongMeta, "title" | "description" | "tags">> = {};
+    if (title.trim() !== song.title) patch.title = title;
+    if (description !== song.description) patch.description = description;
+    if (nextTags.join("\0") !== song.tags.join("\0")) patch.tags = nextTags;
+    if (Object.keys(patch).length > 0) onChange(patch);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen((next) => !next)}
+        className="max-w-72 truncate rounded-lg px-2 py-1 text-left text-sm font-semibold text-kumo-default hover:bg-kumo-elevated focus-visible:ring-2 focus-visible:ring-kumo-ring"
+      >
+        {song.title}
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-30 mt-2 w-80 rounded-xl border border-kumo-line bg-kumo-base p-3 shadow-xl">
+          <div className="space-y-3">
+            <label className="block">
+              <Text size="xs" variant="secondary" bold>
+                Title {song.userEdited.title ? "" : "(auto)"}
+              </Text>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-kumo-line bg-kumo-elevated px-3 py-2 text-sm text-kumo-default outline-none focus:ring-2 focus:ring-kumo-ring"
+              />
+            </label>
+            <label className="block">
+              <Text size="xs" variant="secondary" bold>
+                Description {song.userEdited.description ? "" : "(auto)"}
+              </Text>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+                placeholder="Dreamy minor synthwave sketch..."
+                className="mt-1 w-full rounded-lg border border-kumo-line bg-kumo-elevated px-3 py-2 text-sm text-kumo-default outline-none focus:ring-2 focus:ring-kumo-ring"
+              />
+            </label>
+            <label className="block">
+              <Text size="xs" variant="secondary" bold>
+                Tags {song.userEdited.tags ? "" : "(auto)"}
+              </Text>
+              <input
+                value={tags}
+                onChange={(e) => setTags(e.target.value)}
+                placeholder="lofi, modular, chorus idea"
+                className="mt-1 w-full rounded-lg border border-kumo-line bg-kumo-elevated px-3 py-2 text-sm text-kumo-default outline-none focus:ring-2 focus:ring-kumo-ring"
+              />
+            </label>
+            {song.chatSummary && (
+              <p className="rounded-lg bg-kumo-elevated px-3 py-2 text-xs text-kumo-subtle">
+                Chat summary: {song.chatSummary}
+              </p>
+            )}
+            <div className="flex items-center justify-between gap-2">
+              <Button variant="ghost" size="sm" onClick={onRefreshChatSummary}>
+                Refresh chat summary
+              </Button>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" size="sm" onClick={save} disabled={!title.trim()}>
+                  Save
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function SurfaceTabs({ surface, onChange }: { surface: Surface; onChange: (s: Surface) => void }) {
   const tabs: { id: Surface; label: string }[] = [
@@ -74,15 +180,41 @@ function SurfaceTabs({ surface, onChange }: { surface: Surface; onChange: (s: Su
 export function SongView({
   userId,
   songId,
+  songMeta,
   surface,
   onSurfaceChange,
   onMeta,
+  onDetailsChange,
+  onSearchDoc,
+  onRefreshChatSummary,
 }: {
   userId: string;
   songId: string;
+  songMeta: SongMeta;
   surface: Surface;
   onSurfaceChange: (s: Surface) => void;
   onMeta: (songId: string, key: string, tempo: number) => void;
+  onDetailsChange: (
+    songId: string,
+    patch: Partial<Pick<SongMeta, "title" | "description" | "tags">>,
+  ) => void;
+  onSearchDoc: (
+    songId: string,
+    doc: Partial<
+      Pick<
+        SongMeta,
+        | "title"
+        | "description"
+        | "tags"
+        | "searchSummary"
+        | "searchText"
+        | "chatSummary"
+        | "key"
+        | "tempo"
+      >
+    >,
+  ) => void;
+  onRefreshChatSummary: (songId: string) => void;
 }) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [hasLoadedSong, setHasLoadedSong] = useState(false);
@@ -92,6 +224,8 @@ export function SongView({
   // Stable ref so the state callback below doesn't need to re-subscribe.
   const onMetaRef = useRef(onMeta);
   onMetaRef.current = onMeta;
+  const onSearchDocRef = useRef(onSearchDoc);
+  onSearchDocRef.current = onSearchDoc;
 
   // `agent` is assigned just below; the state callback reaches it via this ref.
   const agentRef = useRef<{ setState: (s: SongState) => void } | null>(null);
@@ -105,7 +239,9 @@ export function SongView({
     name: userId,
     sub: [{ agent: "song", name: songId }],
     onOpen: useCallback(() => setConnectionStatus("connected"), []),
-    onClose: useCallback(() => setConnectionStatus("disconnected"), []),
+    onClose: useCallback(() => {
+      setConnectionStatus("disconnected");
+    }, []),
     onStateUpdate: useCallback(
       (next: SongState) => {
         let norm = normalizeSong(next);
@@ -122,7 +258,9 @@ export function SongView({
       },
       [songId],
     ),
-    onError: useCallback((error: Event) => console.error("WebSocket error:", error), []),
+    onError: useCallback((error: Event) => {
+      console.error("WebSocket error:", error);
+    }, []),
   });
   agentRef.current = agent;
 
@@ -206,6 +344,57 @@ export function SongView({
     (p: Patch) => updateSong({ ...song, patch: p }),
     [song, updateSong],
   );
+  const updateChatSummary = useCallback(
+    (chatSummary: string) => onSearchDoc(songId, { chatSummary }),
+    [onSearchDoc, songId],
+  );
+
+  const searchDocKey = JSON.stringify([
+    songMeta.title,
+    songMeta.description,
+    songMeta.tags,
+    songMeta.chatSummary,
+    song.chords,
+    song.key,
+    song.tempo,
+    song.instrument,
+    song.bass,
+    song.drums,
+    song.melody,
+    song.beat,
+    song.arrangement,
+    song.mix,
+    song.groove,
+    song.patch,
+  ]);
+  const lastSearchDocSig = useRef("");
+  useEffect(() => {
+    if (!hasLoadedSong) return;
+    const timeout = window.setTimeout(() => {
+      const doc = buildSongSearchDoc(songMeta, song);
+      const autoDetails = buildAutoSongDetails(song, doc);
+      const sig = JSON.stringify([
+        autoDetails.title,
+        autoDetails.description,
+        autoDetails.tags,
+        doc.summary,
+        doc.text,
+        song.key,
+        song.tempo,
+      ]);
+      if (sig === lastSearchDocSig.current) return;
+      lastSearchDocSig.current = sig;
+      onSearchDocRef.current(songId, {
+        ...autoDetails,
+        key: song.key,
+        tempo: song.tempo,
+        searchSummary: doc.summary,
+        searchText: doc.text,
+      });
+    }, 500);
+    return () => window.clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchDocKey, hasLoadedSong, songId]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -232,8 +421,14 @@ export function SongView({
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <div className="px-5 py-2 bg-kumo-base border-b border-kumo-line flex items-center justify-center">
+      <div className="px-5 py-2 bg-kumo-base border-b border-kumo-line grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+        <SongDetails
+          song={songMeta}
+          onChange={(patch) => onDetailsChange(songId, patch)}
+          onRefreshChatSummary={() => onRefreshChatSummary(songId)}
+        />
         <SurfaceTabs surface={surface} onChange={onSurfaceChange} />
+        <div />
       </div>
       <div className="flex-1 flex min-h-0 relative">
         <div
@@ -255,7 +450,11 @@ export function SongView({
             Loading song…
           </output>
         )}
-        <ChatPanel agent={agent} connectionStatus={connectionStatus} />
+        <ChatPanel
+          agent={agent}
+          connectionStatus={connectionStatus}
+          onChatSummary={updateChatSummary}
+        />
       </div>
     </div>
   );

@@ -117,6 +117,8 @@ src/
                             central engine render/transport effects.
   music/song.ts             SongState/SongDoc data model + deterministic music:
                             chord voicing, bass & drum generators, beat grid.
+  music/search.ts           Search document metadata; Studio queries it through
+                            server-side Orama for sidebar/global search.
   audio/
     engine.ts               Tone.js transport + sampled instruments + synth
                             drum kit + bass voice; schedules chord/bass/drum parts.
@@ -154,6 +156,7 @@ Elementary engine.
 - **UI:** React 19, `@cloudflare/kumo`, Tailwind v4, Vite
 - **Audio:** Tone.js, `smplr` soundfonts, Elementary Audio, React Flow
 - **Theory:** `@tonaljs/tonal`
+- **Search:** Server-side Orama index rebuilt from Studio metadata on demand
 - **Tools/validation:** `ai` SDK + `zod`
 
 ## Develop

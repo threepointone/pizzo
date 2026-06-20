@@ -169,7 +169,7 @@ export class Song extends Think<Env, SongState> {
 
   override getSystemPrompt() {
     const s = this.song();
-    return [
+    const prompt = [
       "You are the studio assistant inside Pizzo, an AI-assisted music app.",
       "The user is a capable musician but an amateur at music theory — you are their theory brain and arranger.",
       "You work by calling tools that change the live song. Never claim you changed something without calling the matching tool.",
@@ -222,6 +222,7 @@ export class Song extends Think<Env, SongState> {
       "Modular module palette (type: inputs / outputs / params):",
       describeModulePalette(),
     ].join("\n");
+    return prompt;
   }
 
   override getTools() {
@@ -490,8 +491,8 @@ export class Song extends Think<Env, SongState> {
           sections: z
             .array(
               z.object({
-                name: z.string(),
-                chords: z.union([z.array(z.string()), z.string()]),
+                name: z.string().optional(),
+                chords: z.union([z.array(z.string()), z.string()]).optional(),
                 repeats: z.number().int().min(1).max(16).optional(),
                 drums: z.boolean().optional(),
                 bass: z.boolean().optional(),
@@ -503,11 +504,19 @@ export class Song extends Think<Env, SongState> {
         }),
         execute: async ({ sections }) => {
           const built: Section[] = [];
-          for (const sec of sections) {
+          const skipped: string[] = [];
+          for (const [index, sec] of sections.entries()) {
+            if (sec.chords == null) {
+              skipped.push(sec.name?.trim() || `section ${index + 1}`);
+              continue;
+            }
             const chords = normalizeChords(sec.chords).filter(isChord);
-            if (chords.length === 0) continue;
+            if (chords.length === 0) {
+              skipped.push(sec.name?.trim() || `section ${index + 1}`);
+              continue;
+            }
             built.push(
-              makeSection(sec.name, chords, {
+              makeSection(sec.name?.trim() || `Section ${index + 1}`, chords, {
                 repeats: sec.repeats,
                 drums: sec.drums,
                 bass: sec.bass,
@@ -521,6 +530,10 @@ export class Song extends Think<Env, SongState> {
           }
           const s = this.song();
           const { key, scale } = guessKey(built[0].chords);
+          const bars = built.reduce(
+            (sum, section) => sum + section.chords.length * Math.max(1, section.repeats),
+            0,
+          );
           this.setState({
             ...s,
             key,
@@ -528,12 +541,12 @@ export class Song extends Think<Env, SongState> {
             arrangement: { enabled: true, sections: built, current: built[0].id },
           });
           return {
-            sections: built.map((b) => ({
-              name: b.name,
-              chords: b.chords,
-              repeats: b.repeats,
-              voices: [b.drums && "drums", b.bass && "bass", b.melody && "melody"].filter(Boolean),
-            })),
+            arrangement: "enabled",
+            sectionCount: built.length,
+            sections: built.map((b) => b.name),
+            bars,
+            key,
+            skipped,
           };
         },
       }),

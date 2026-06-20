@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { getToolName, isToolUIPart } from "ai";
@@ -43,6 +43,11 @@ function getMessageText(message: UIMessage): string {
     .join("");
 }
 
+function formatToolPayload(value: unknown): string {
+  const json = JSON.stringify(value, null, 2);
+  return json.length > 3000 ? `${json.slice(0, 3000)}\n… truncated` : json;
+}
+
 /** Text and reasoning parts use `state: streaming` with empty `text` until the first delta. */
 function shouldShowStreamedTextPart(part: { text: string; state?: "streaming" | "done" }): boolean {
   return part.text.length > 0 || part.state === "streaming";
@@ -51,15 +56,18 @@ function shouldShowStreamedTextPart(part: { text: string; state?: "streaming" | 
 export function ChatPanel({
   agent,
   connectionStatus,
+  onChatSummary,
 }: {
   agent: AgentConnection;
   connectionStatus: ConnectionStatus;
+  onChatSummary?: (summary: string) => void;
 }) {
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
   const { messages, sendMessage, clearHistory, stop, status } = useAgentChat({
     agent,
+    experimental_throttle: 100,
   });
 
   const isStreaming = status === "streaming" || status === "submitted";
@@ -68,6 +76,22 @@ export function ChatPanel({
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const chatSummary = useMemo(() => {
+    const lines = messages
+      .slice(-8)
+      .map((message) => {
+        const text = getMessageText(message).trim().replace(/\s+/g, " ");
+        if (!text) return "";
+        return `${message.role}: ${text}`;
+      })
+      .filter(Boolean);
+    return lines.length > 0 ? `Recent chat: ${lines.join(" / ").slice(0, 600)}` : "";
+  }, [messages]);
+
+  useEffect(() => {
+    if (chatSummary) onChatSummary?.(chatSummary);
+  }, [chatSummary, onChatSummary]);
 
   const send = useCallback(() => {
     const text = input.trim();
@@ -186,7 +210,7 @@ export function ChatPanel({
                       </div>
                       {toolInput != null && (
                         <pre className="mt-1 p-2 rounded-lg bg-kumo-elevated text-xs font-mono text-kumo-subtle overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-all">
-                          {JSON.stringify(toolInput, null, 2)}
+                          {formatToolPayload(toolInput)}
                         </pre>
                       )}
                       {errorText && (
@@ -196,7 +220,7 @@ export function ChatPanel({
                       )}
                       {toolOutput != null && (
                         <pre className="mt-1 p-2 rounded-lg bg-kumo-elevated text-xs font-mono text-kumo-subtle overflow-x-auto max-h-60 overflow-y-auto whitespace-pre-wrap break-all">
-                          {JSON.stringify(toolOutput, null, 2)}
+                          {formatToolPayload(toolOutput)}
                         </pre>
                       )}
                     </Surface>
