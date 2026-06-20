@@ -4,7 +4,8 @@
 declare module "virtual:think/entry" {
   const entry: ExportedHandler<Cloudflare.Env>;
   export default entry;
-  export const ThinkAgent_Assistant: (typeof import("./agents/assistant/agent"))["Assistant"];
+  export const ThinkAgent_Studio: (typeof import("./agents/studio/agent"))["Studio"];
+  export const ThinkSubAgent_Studio_Song: (typeof import("./agents/studio/agents/song/agent"))["Song"];
 }
 declare module "virtual:think/router" {
   export const thinkRouter: import("@cloudflare/think/server-entry").ThinkRouter;
@@ -12,8 +13,8 @@ declare module "virtual:think/router" {
 
 declare namespace Cloudflare {
   interface Env {
-    ThinkAgent_Assistant: DurableObjectNamespace<
-      InstanceType<(typeof import("./agents/assistant/agent"))["Assistant"]>
+    ThinkAgent_Studio: DurableObjectNamespace<
+      InstanceType<(typeof import("./agents/studio/agent"))["Studio"]>
     >;
   }
 }

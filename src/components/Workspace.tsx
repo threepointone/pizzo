@@ -1,0 +1,944 @@
+import { useCallback, useState, type ReactNode } from "react";
+import { Badge, Button, Text } from "@cloudflare/kumo";
+import {
+  ArrowsClockwiseIcon,
+  DownloadSimpleIcon,
+  MusicNotesIcon,
+  PlusIcon,
+  RepeatIcon,
+  RepeatOnceIcon,
+  SlidersHorizontalIcon,
+  SparkleIcon,
+  XIcon,
+} from "@phosphor-icons/react";
+import { exportSongWav } from "../audio/audioExport";
+import { downloadSongMidi } from "../audio/midiExport";
+import { Arrangement } from "./Arrangement";
+import { Playhead } from "./Playhead";
+import { TransportControls } from "./TransportControls";
+import { useToast } from "./Toast";
+import {
+  analyzeRomanNumerals,
+  applyVibe,
+  BASS_STYLES,
+  chordFunctions,
+  chordRoots,
+  DRUM_STYLES,
+  generateDrums,
+  generateMelody,
+  guessKey,
+  INSTRUMENTS,
+  isChord,
+  MELODY_STYLES,
+  MIX_TRACKS,
+  parseProgression,
+  songStateFromProgression,
+  VIBES,
+  type BassStyle,
+  type DrumStyle,
+  type DrumVoice,
+  type HarmonicFunction,
+  type MelodyStyle,
+  type Mix,
+  type Section,
+  type SongState,
+} from "../music/song";
+
+const ROOTS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
+
+const QUALITIES = [
+  { label: "maj", suffix: "" },
+  { label: "min", suffix: "m" },
+  { label: "7", suffix: "7" },
+  { label: "maj7", suffix: "maj7" },
+  { label: "min7", suffix: "m7" },
+  { label: "dim", suffix: "dim" },
+  { label: "sus4", suffix: "sus4" },
+] as const;
+
+const LANE_COLORS: Record<string, string> = {
+  chords: "bg-orange-500/80",
+  bass: "bg-sky-500/80",
+  drums: "bg-violet-500/80",
+  melody: "bg-emerald-500/80",
+};
+
+function TransportBar({
+  isPlaying,
+  onToggle,
+  tempo,
+  onTempoChange,
+  songKey,
+  instrument,
+  onInstrumentChange,
+  onExport,
+  onExportWav,
+  exportingWav,
+  loopSong,
+  onToggleLoop,
+}: {
+  isPlaying: boolean;
+  onToggle: () => void;
+  tempo: number;
+  onTempoChange: (bpm: number) => void;
+  songKey: string;
+  instrument: string;
+  onInstrumentChange: (id: string) => void;
+  onExport: () => void;
+  onExportWav: () => void;
+  exportingWav: boolean;
+  loopSong: boolean;
+  onToggleLoop: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3 bg-kumo-base border-b border-kumo-line">
+      <TransportControls
+        isPlaying={isPlaying}
+        onToggle={onToggle}
+        tempo={tempo}
+        onTempoChange={onTempoChange}
+        tempoId="chord-lab-tempo"
+      >
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={loopSong ? <RepeatIcon size={15} /> : <RepeatOnceIcon size={15} />}
+          onClick={onToggleLoop}
+          title={
+            loopSong ? "Looping the whole song - click to play once" : "Plays once - click to loop"
+          }
+        >
+          {loopSong ? "Loop" : "Once"}
+        </Button>
+        <div className="flex items-center gap-2">
+          <Text size="xs" variant="secondary">
+            Key
+          </Text>
+          <Badge variant="secondary">{songKey}</Badge>
+        </div>
+        <label className="flex items-center gap-2">
+          <Text size="xs" variant="secondary">
+            Sound
+          </Text>
+          <select
+            value={instrument}
+            onChange={(e) => onInstrumentChange(e.target.value)}
+            className="px-2 py-1 rounded-md border border-kumo-line bg-kumo-elevated text-kumo-default text-sm outline-none focus:ring-2 focus:ring-kumo-ring"
+          >
+            {INSTRUMENTS.map((i) => (
+              <option key={i.id} value={i.id}>
+                {i.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex-1" />
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<DownloadSimpleIcon size={16} />}
+          onClick={onExport}
+          title="Download the song as a MIDI file"
+        >
+          MIDI
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<DownloadSimpleIcon size={16} />}
+          onClick={onExportWav}
+          disabled={exportingWav}
+          title="Render the song to a WAV audio file (plays through once)"
+        >
+          {exportingWav ? "Rendering..." : "WAV"}
+        </Button>
+      </TransportControls>
+    </div>
+  );
+}
+
+const FUNCTION_STYLE: Record<HarmonicFunction, { dot: string; label: string }> = {
+  Tonic: { dot: "bg-emerald-400", label: "text-emerald-300" },
+  Subdominant: { dot: "bg-sky-400", label: "text-sky-300" },
+  Dominant: { dot: "bg-amber-400", label: "text-amber-300" },
+  Chromatic: { dot: "bg-kumo-inactive", label: "text-kumo-inactive" },
+};
+
+/** A live mini theory lesson: Roman numeral + harmonic function per chord. */
+function TheoryStrip({ chords, songKey }: { chords: string[]; songKey: string }) {
+  if (chords.length === 0) return null;
+  const romans = analyzeRomanNumerals(chords);
+  const functions = chordFunctions(chords, songKey);
+  return (
+    <div className="px-5 pb-4 -mt-1">
+      <div className="flex items-center gap-2 mb-2">
+        <Text size="xs" variant="secondary" bold>
+          Theory
+        </Text>
+        <Text size="xs" variant="secondary">
+          {songKey}
+        </Text>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {chords.map((chord, i) => {
+          const fn = functions[i] ?? "Chromatic";
+          const style = FUNCTION_STYLE[fn];
+          return (
+            <div
+              key={`${chord}-${i}`}
+              className="flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg border border-kumo-line min-w-14"
+              title={`${chord} — ${romans[i] ?? "?"} (${fn})`}
+            >
+              <span className="text-sm font-bold text-kumo-default leading-none">
+                {romans[i] ?? "?"}
+              </span>
+              <span className={`flex items-center gap-1 text-[10px] ${style.label}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+                {fn === "Chromatic" ? "—" : fn.slice(0, 4)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ChordStrip({
+  chords,
+  onRemove,
+  onClear,
+}: {
+  chords: string[];
+  onRemove: (index: number) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="px-5 py-4">
+      <div className="flex items-center justify-between mb-2">
+        <Text size="xs" variant="secondary" bold>
+          Progression
+        </Text>
+        {chords.length > 0 && (
+          <Button variant="ghost" size="sm" onClick={onClear}>
+            Clear
+          </Button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {chords.length === 0 && (
+          <div className="text-sm text-kumo-inactive italic py-2">
+            Add chords with the pads below, or type a progression like “Am F C G”.
+          </div>
+        )}
+        {chords.map((chord, i) => (
+          <div
+            key={`${chord}-${i}`}
+            className="group flex items-center gap-1.5 pl-3 pr-2 py-2 rounded-xl bg-kumo-contrast text-kumo-inverse"
+          >
+            <span className="text-xs opacity-60 tabular-nums">{i + 1}</span>
+            <span className="font-semibold">{chord}</span>
+            <button
+              type="button"
+              aria-label={`Remove ${chord}`}
+              onClick={() => onRemove(i)}
+              className="opacity-50 hover:opacity-100 transition-opacity"
+            >
+              <XIcon size={14} weight="bold" />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChordInput({
+  onAdd,
+  onSetProgression,
+}: {
+  onAdd: (chord: string) => void;
+  onSetProgression: (chords: string[]) => void;
+}) {
+  const [quality, setQuality] = useState<(typeof QUALITIES)[number]>(QUALITIES[0]);
+  const [text, setText] = useState("");
+
+  const submitText = useCallback(() => {
+    const parsed = parseProgression(text);
+    if (parsed.length > 0) {
+      onSetProgression(parsed);
+      setText("");
+    }
+  }, [text, onSetProgression]);
+
+  return (
+    <div className="px-5 py-4 border-t border-kumo-line space-y-3">
+      <div>
+        <Text size="xs" variant="secondary" bold>
+          Quality
+        </Text>
+        <div className="flex flex-wrap gap-1.5 mt-1.5">
+          {QUALITIES.map((q) => (
+            <button
+              key={q.label}
+              type="button"
+              aria-pressed={quality.label === q.label}
+              onClick={() => setQuality(q)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                quality.label === q.label
+                  ? "bg-kumo-contrast text-kumo-inverse"
+                  : "bg-kumo-elevated text-kumo-subtle hover:bg-kumo-line"
+              }`}
+            >
+              {q.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <Text size="xs" variant="secondary" bold>
+          Root
+        </Text>
+        <div className="grid grid-cols-12 gap-1.5 mt-1.5">
+          {ROOTS.map((root) => (
+            <button
+              key={root}
+              type="button"
+              aria-label={`Add ${root}${quality.suffix || " major"} chord`}
+              onClick={() => onAdd(`${root}${quality.suffix}`)}
+              className={`py-2 rounded-lg text-sm font-semibold transition-colors ${
+                root.includes("#")
+                  ? "bg-kumo-contrast/90 text-kumo-inverse hover:bg-kumo-contrast"
+                  : "bg-kumo-elevated text-kumo-default hover:bg-kumo-line"
+              }`}
+            >
+              {root}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-end gap-2">
+        <label className="flex-1">
+          <Text size="xs" variant="secondary" bold>
+            Or type a progression
+          </Text>
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submitText();
+              }
+            }}
+            placeholder="Am F C G"
+            className="mt-1.5 w-full px-3 py-2 rounded-lg border border-kumo-line bg-kumo-elevated text-kumo-default text-sm outline-none focus:ring-2 focus:ring-kumo-ring"
+          />
+        </label>
+        <Button
+          variant="secondary"
+          icon={<PlusIcon size={16} />}
+          onClick={submitText}
+          disabled={parseProgression(text).length === 0}
+        >
+          Set
+        </Button>
+      </div>
+      {text.trim() !== "" && parseProgression(text).length === 0 && (
+        <Text size="xs" variant="secondary">
+          No recognizable chords yet — try names like Am, F, C, G7, Dm7.
+        </Text>
+      )}
+    </div>
+  );
+}
+
+function Lane({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-stretch gap-3">
+      <div className="w-20 shrink-0 flex items-center">
+        <Text size="xs" variant="secondary">
+          {label}
+        </Text>
+      </div>
+      <div className="flex-1 flex gap-1 min-h-12">{children}</div>
+    </div>
+  );
+}
+
+/** Drum grid for one bar — 3 rows (kick/snare/hats) × 16 steps. */
+function DrumGrid({ style, busy }: { style: DrumStyle; busy: number }) {
+  const hits = generateDrums(style, 1, busy);
+  const rows: { label: string; voices: DrumVoice[]; color: string }[] = [
+    { label: "K", voices: ["kick"], color: "bg-violet-400" },
+    { label: "S", voices: ["snare", "clap"], color: "bg-pink-400" },
+    { label: "H", voices: ["hat", "openhat"], color: "bg-violet-300" },
+  ];
+  const active = (voices: DrumVoice[], step: number) =>
+    hits.some((h) => voices.includes(h.voice) && Math.round(h.startBeat / 0.25) === step);
+  return (
+    <div className="flex-1 flex flex-col gap-1">
+      {rows.map((row) => (
+        <div key={row.label} className="flex items-center gap-1">
+          <span className="w-3 text-[10px] text-kumo-inactive">{row.label}</span>
+          <div className="flex-1 grid grid-cols-16 gap-0.5">
+            {Array.from({ length: 16 }, (_, step) => (
+              <div
+                key={step}
+                className={`h-3 rounded-sm ${
+                  active(row.voices, step)
+                    ? row.color
+                    : step % 4 === 0
+                      ? "bg-kumo-line"
+                      : "bg-kumo-elevated"
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Mini piano-roll preview of the generated melody line. */
+function MelodyRoll({ song }: { song: SongState }) {
+  const { chords, key, scale, melody } = song;
+  const notes = generateMelody(chords, key, scale, melody.style, melody.seed);
+  const totalBeats = Math.max(1, chords.length * 4);
+  if (notes.length === 0) {
+    return <div className="flex-1 rounded-md border border-dashed border-kumo-line" />;
+  }
+  const midis = notes.map((n) => n.midi);
+  const lo = Math.min(...midis);
+  const hi = Math.max(...midis);
+  const span = Math.max(1, hi - lo);
+  return (
+    <div className="flex-1 relative h-12 rounded-md bg-kumo-elevated overflow-hidden">
+      {chords.map((_, i) => (
+        <div
+          key={`bar-${i}`}
+          className="absolute top-0 bottom-0 border-l border-kumo-line/60"
+          style={{ left: `${(i / chords.length) * 100}%` }}
+        />
+      ))}
+      {notes.map((n, i) => {
+        const left = (n.startBeat / totalBeats) * 100;
+        const width = (n.durationBeats / totalBeats) * 100;
+        const top = ((hi - n.midi) / span) * 80 + 6;
+        return (
+          <div
+            key={`${n.startBeat}-${i}`}
+            className={`absolute h-2 rounded-sm ${LANE_COLORS.melody}`}
+            style={{
+              left: `${left}%`,
+              width: `calc(${width}% - 2px)`,
+              top: `${top}%`,
+            }}
+            title={`MIDI ${n.midi}`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function StyleSelect<T extends string>({
+  value,
+  enabled,
+  options,
+  onChange,
+  label,
+}: {
+  value: T;
+  enabled: boolean;
+  options: { id: T; label: string }[];
+  onChange: (value: T | "off") => void;
+  label: string;
+}) {
+  return (
+    <select
+      value={enabled ? value : "off"}
+      aria-label={label}
+      onChange={(e) => onChange(e.target.value as T | "off")}
+      className="px-2 py-1 rounded-md border border-kumo-line bg-kumo-elevated text-kumo-default text-xs outline-none focus:ring-2 focus:ring-kumo-ring"
+    >
+      <option value="off">Off</option>
+      {options.map((o) => (
+        <option key={o.id} value={o.id}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function TrackLanes({ song, playing, bars }: { song: SongState; playing: boolean; bars: number }) {
+  const { chords, bass, drums, melody } = song;
+  const roots = chordRoots(chords);
+  return (
+    <div className="px-5 py-4 border-t border-kumo-line">
+      <Text size="xs" variant="secondary" bold>
+        Tracks
+      </Text>
+      <div className="mt-2 space-y-2 relative">
+        {playing &&
+          chords.length > 0 && (
+            // Overlay aligned to the cells region (after the w-20 label + gap-3).
+            <div
+              className="absolute top-0 bottom-0 pointer-events-none"
+              style={{ left: "92px", right: 0 }}
+            >
+              <div className="relative w-full h-full">
+                <Playhead bars={bars} playing={playing} />
+              </div>
+            </div>
+          )}
+        <Lane label="Chords">
+          {chords.length === 0 ? (
+            <div className="flex-1 rounded-md border border-dashed border-kumo-line" />
+          ) : (
+            chords.map((chord, i) => (
+              <div
+                key={`${chord}-${i}`}
+                className={`flex-1 rounded-md flex items-center justify-center text-xs font-semibold text-white h-12 ${LANE_COLORS.chords}`}
+              >
+                {chord}
+              </div>
+            ))
+          )}
+        </Lane>
+
+        {bass.enabled && chords.length > 0 && (
+          <Lane label="Bass">
+            {roots.map((root, i) => (
+              <div
+                key={`${root}-${i}`}
+                className={`flex-1 rounded-md flex items-center justify-center text-xs font-semibold text-white h-8 ${LANE_COLORS.bass}`}
+              >
+                {root}
+              </div>
+            ))}
+          </Lane>
+        )}
+
+        {melody.enabled && chords.length > 0 && (
+          <Lane label="Melody">
+            <MelodyRoll song={song} />
+          </Lane>
+        )}
+
+        {drums.enabled && (
+          <Lane label="Drums">
+            <DrumGrid style={drums.style} busy={drums.busy} />
+          </Lane>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** One-click "vibe" presets that set the whole band feel (and progression). */
+function VibeBar({ song, onChange }: { song: SongState; onChange: (next: SongState) => void }) {
+  const arranged = song.arrangement?.enabled && song.arrangement.sections.length > 0;
+  return (
+    <div className="px-5 py-4 border-t border-kumo-line space-y-2">
+      <div className="flex items-center gap-2">
+        <SparkleIcon size={14} className="text-kumo-accent" />
+        <Text size="xs" variant="secondary" bold>
+          Vibe
+        </Text>
+        {arranged && (
+          <Text size="xs" variant="secondary">
+            (keeps your sections — sets the band + sounds)
+          </Text>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {VIBES.map((vibe) => (
+          <button
+            key={vibe.id}
+            type="button"
+            onClick={() => onChange(applyVibe(song, vibe))}
+            className="px-3 py-1.5 rounded-full border border-kumo-line bg-kumo-elevated text-kumo-default text-xs font-medium hover:border-kumo-accent hover:text-kumo-accent transition-colors"
+          >
+            {vibe.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BandPanel({ song, onChange }: { song: SongState; onChange: (next: SongState) => void }) {
+  const { bass, drums, melody, groove } = song;
+  return (
+    <div className="px-5 py-4 border-t border-kumo-line space-y-3">
+      <Text size="xs" variant="secondary" bold>
+        Band
+      </Text>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <div className="flex items-center gap-2">
+          <Text size="xs" variant="secondary">
+            Drums
+          </Text>
+          <StyleSelect
+            label="Drums style"
+            value={drums.style}
+            enabled={drums.enabled}
+            options={DRUM_STYLES}
+            onChange={(v) =>
+              onChange(
+                v === "off"
+                  ? { ...song, drums: { ...drums, enabled: false } }
+                  : { ...song, drums: { ...drums, enabled: true, style: v as DrumStyle } },
+              )
+            }
+          />
+        </div>
+        {drums.enabled && (
+          <label className="flex items-center gap-2" htmlFor="drums-busy">
+            <Text size="xs" variant="secondary">
+              Busy
+            </Text>
+            <input
+              id="drums-busy"
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={drums.busy}
+              onChange={(e) =>
+                onChange({
+                  ...song,
+                  drums: { ...drums, busy: Number(e.target.value) },
+                })
+              }
+              className="w-28 accent-kumo-accent"
+            />
+          </label>
+        )}
+        <div className="flex items-center gap-2">
+          <Text size="xs" variant="secondary">
+            Bass
+          </Text>
+          <StyleSelect
+            label="Bass style"
+            value={bass.style}
+            enabled={bass.enabled}
+            options={BASS_STYLES}
+            onChange={(v) =>
+              onChange(
+                v === "off"
+                  ? { ...song, bass: { ...bass, enabled: false } }
+                  : { ...song, bass: { ...bass, enabled: true, style: v as BassStyle } },
+              )
+            }
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Text size="xs" variant="secondary">
+            Melody
+          </Text>
+          <StyleSelect
+            label="Melody style"
+            value={melody.style}
+            enabled={melody.enabled}
+            options={MELODY_STYLES}
+            onChange={(v) =>
+              onChange(
+                v === "off"
+                  ? { ...song, melody: { ...melody, enabled: false } }
+                  : { ...song, melody: { ...melody, enabled: true, style: v as MelodyStyle } },
+              )
+            }
+          />
+        </div>
+        {melody.enabled && (
+          <>
+            <label className="flex items-center gap-2">
+              <Text size="xs" variant="secondary">
+                Lead sound
+              </Text>
+              <select
+                value={melody.instrument}
+                onChange={(e) =>
+                  onChange({ ...song, melody: { ...melody, instrument: e.target.value } })
+                }
+                className="px-2 py-1 rounded-md border border-kumo-line bg-kumo-elevated text-kumo-default text-xs outline-none focus:ring-2 focus:ring-kumo-ring"
+              >
+                {INSTRUMENTS.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<ArrowsClockwiseIcon size={14} />}
+              onClick={() => onChange({ ...song, melody: { ...melody, seed: melody.seed + 1 } })}
+            >
+              Regenerate
+            </Button>
+          </>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
+        <Text size="xs" variant="secondary" bold>
+          Feel
+        </Text>
+        <label className="flex items-center gap-2" title="Delay every other 8th note for a shuffle">
+          <Text size="xs" variant="secondary">
+            Swing
+          </Text>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={groove.swing}
+            onChange={(e) =>
+              onChange({ ...song, groove: { ...groove, swing: Number(e.target.value) } })
+            }
+            className="w-28 accent-kumo-accent"
+          />
+          <Text size="xs" variant="secondary">
+            {Math.round(groove.swing * 100)}%
+          </Text>
+        </label>
+        <label
+          className="flex items-center gap-2"
+          title="Jitter timing + velocity so it sounds less robotic"
+        >
+          <Text size="xs" variant="secondary">
+            Humanize
+          </Text>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={groove.humanize}
+            onChange={(e) =>
+              onChange({ ...song, groove: { ...groove, humanize: Number(e.target.value) } })
+            }
+            className="w-28 accent-kumo-accent"
+          />
+          <Text size="xs" variant="secondary">
+            {Math.round(groove.humanize * 100)}%
+          </Text>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+/** Per-track mixer: volume faders + mute/solo, plus a master fader. */
+function Mixer({ song, onChange }: { song: SongState; onChange: (next: SongState) => void }) {
+  const mix = song.mix;
+  const setTrack = (id: keyof Omit<Mix, "master">, patch: Partial<Mix["chords"]>) =>
+    onChange({ ...song, mix: { ...mix, [id]: { ...mix[id], ...patch } } });
+  return (
+    <div className="px-5 py-4 border-t border-kumo-line space-y-3">
+      <div className="flex items-center gap-2">
+        <SlidersHorizontalIcon size={14} className="text-kumo-accent" />
+        <Text size="xs" variant="secondary" bold>
+          Mixer
+        </Text>
+      </div>
+      <div className="space-y-2">
+        {MIX_TRACKS.map((track) => {
+          const ch = mix[track.id];
+          return (
+            <div key={track.id} className="flex items-center gap-3">
+              <span className="w-16 shrink-0 text-xs text-kumo-subtle">{track.label}</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={ch.volume}
+                onChange={(e) => setTrack(track.id, { volume: Number(e.target.value) })}
+                className="flex-1 max-w-64 accent-kumo-accent"
+                aria-label={`${track.label} volume`}
+              />
+              <span className="w-9 text-right text-[10px] text-kumo-inactive tabular-nums">
+                {Math.round(ch.volume * 100)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setTrack(track.id, { mute: !ch.mute })}
+                aria-pressed={ch.mute}
+                aria-label={`${ch.mute ? "Unmute" : "Mute"} ${track.label}`}
+                className={`w-7 h-6 rounded-md text-[10px] font-bold transition-colors ${
+                  ch.mute
+                    ? "bg-amber-500 text-white"
+                    : "bg-kumo-elevated text-kumo-subtle hover:bg-kumo-line"
+                }`}
+                title="Mute"
+              >
+                M
+              </button>
+              <button
+                type="button"
+                onClick={() => setTrack(track.id, { solo: !ch.solo })}
+                aria-pressed={ch.solo}
+                aria-label={`${ch.solo ? "Unsolo" : "Solo"} ${track.label}`}
+                className={`w-7 h-6 rounded-md text-[10px] font-bold transition-colors ${
+                  ch.solo
+                    ? "bg-emerald-500 text-white"
+                    : "bg-kumo-elevated text-kumo-subtle hover:bg-kumo-line"
+                }`}
+                title="Solo"
+              >
+                S
+              </button>
+            </div>
+          );
+        })}
+        <div className="flex items-center gap-3 pt-1 border-t border-kumo-line/60">
+          <span className="w-16 shrink-0 text-xs font-semibold text-kumo-subtle">Master</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={mix.master}
+            onChange={(e) => onChange({ ...song, mix: { ...mix, master: Number(e.target.value) } })}
+            className="flex-1 max-w-64 accent-kumo-accent"
+            aria-label="Master volume"
+          />
+          <span className="w-9 text-right text-[10px] text-kumo-inactive tabular-nums">
+            {Math.round(mix.master * 100)}
+          </span>
+          <span className="w-[60px]" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function Workspace({
+  song,
+  onChange,
+}: {
+  song: SongState;
+  onChange: (next: SongState) => void;
+}) {
+  const [exportingWav, setExportingWav] = useState(false);
+  const { toast } = useToast();
+  const arr = song.arrangement;
+  const arrangementOn = arr.enabled && arr.sections.length > 0;
+  const currentSection: Section | null = arrangementOn
+    ? (arr.sections.find((s) => s.id === arr.current) ?? arr.sections[0])
+    : null;
+  const chords = currentSection ? currentSection.chords : song.chords;
+
+  // In arrangement mode the lanes preview the selected section: its chords +
+  // its own per-section voice toggles (which override the global enabled flags).
+  const laneSong: SongState = currentSection
+    ? {
+        ...song,
+        chords: currentSection.chords,
+        ...guessKey(currentSection.chords),
+        bass: { ...song.bass, enabled: currentSection.bass },
+        drums: { ...song.drums, enabled: currentSection.drums, busy: currentSection.busy },
+        melody: { ...song.melody, enabled: currentSection.melody },
+      }
+    : song;
+
+  const setChords = useCallback(
+    (next: string[]) => {
+      if (currentSection) {
+        const sections = arr.sections.map((s) =>
+          s.id === currentSection.id ? { ...s, chords: next } : s,
+        );
+        const first = sections[0];
+        const keyInfo = first ? guessKey(first.chords) : null;
+        onChange({
+          ...song,
+          key: keyInfo?.key ?? song.key,
+          scale: keyInfo?.scale ?? song.scale,
+          arrangement: { ...arr, sections },
+        });
+      } else {
+        onChange(songStateFromProgression(next, song));
+      }
+    },
+    [arr, currentSection, onChange, song],
+  );
+
+  const addChord = useCallback(
+    (chord: string) => {
+      if (!isChord(chord)) return;
+      setChords([...chords, chord]);
+    },
+    [chords, setChords],
+  );
+
+  const removeChord = useCallback(
+    (index: number) => setChords(chords.filter((_, i) => i !== index)),
+    [chords, setChords],
+  );
+
+  return (
+    <main className="flex-1 flex flex-col overflow-y-auto bg-kumo-elevated">
+      <TransportBar
+        isPlaying={song.playing}
+        onToggle={() => onChange({ ...song, playing: !song.playing })}
+        tempo={song.tempo}
+        onTempoChange={(tempo) => onChange({ ...song, tempo })}
+        songKey={song.key}
+        instrument={song.instrument}
+        onInstrumentChange={(instrument) => onChange({ ...song, instrument })}
+        onExport={() => {
+          try {
+            downloadSongMidi(song, `pizzo-${song.key.replace(/\s+/g, "-").toLowerCase()}.mid`);
+            toast("Downloaded MIDI.", "success");
+          } catch {
+            toast("Couldn't export MIDI.", "error");
+          }
+        }}
+        onExportWav={async () => {
+          if (exportingWav) return;
+          if (song.playing) onChange({ ...song, playing: false });
+          setExportingWav(true);
+          try {
+            await exportSongWav(`pizzo-${song.key.replace(/\s+/g, "-").toLowerCase()}.wav`);
+            toast("Rendered WAV.", "success");
+          } catch {
+            toast("Couldn't render WAV.", "error");
+          } finally {
+            setExportingWav(false);
+          }
+        }}
+        exportingWav={exportingWav}
+        loopSong={song.loopSong !== false}
+        onToggleLoop={() => onChange({ ...song, loopSong: !(song.loopSong !== false) })}
+      />
+
+      <div className="flex items-center gap-2 px-5 pt-5">
+        <MusicNotesIcon size={18} className="text-kumo-accent" />
+        <Text size="sm" bold>
+          Chord Lab
+        </Text>
+        {currentSection && <Badge variant="secondary">Editing: {currentSection.name}</Badge>}
+      </div>
+
+      <Arrangement song={song} onChange={onChange} playing={song.playing} />
+      <ChordStrip chords={chords} onRemove={removeChord} onClear={() => setChords([])} />
+      <TheoryStrip chords={chords} songKey={laneSong.key} />
+      <TrackLanes
+        song={laneSong}
+        playing={song.playing && !arrangementOn}
+        bars={Math.max(chords.length, 1)}
+      />
+      <BandPanel song={song} onChange={onChange} />
+      <Mixer song={song} onChange={onChange} />
+      <VibeBar song={song} onChange={onChange} />
+      <ChordInput onAdd={addChord} onSetProgression={setChords} />
+    </main>
+  );
+}

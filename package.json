@@ -1,28 +1,40 @@
 {
   "name": "pizzo",
-  "description": "Minimal Think chat agent on Cloudflare Workers",
-  "private": true,
-  "type": "module",
   "version": "0.0.0",
+  "private": true,
+  "description": "AI-assisted web-based music studio on Cloudflare Workers",
+  "type": "module",
   "scripts": {
     "start": "vite dev",
     "dev": "vite dev",
     "build": "vite build",
     "deploy": "vite build && wrangler deploy",
+    "format": "oxfmt --check README.md agents src index.html package.json .oxfmtrc.json todo.md vite.config.ts vitest.config.ts wrangler.jsonc design .github",
+    "format:write": "oxfmt README.md agents src index.html package.json .oxfmtrc.json todo.md vite.config.ts vitest.config.ts wrangler.jsonc design .github",
+    "lint": "oxlint . --import-plugin --react-plugin --jsx-a11y-plugin --vitest-plugin --deny-warnings",
+    "test": "vitest run --config vitest.config.ts",
     "types": "think types --all"
   },
   "dependencies": {
     "@cloudflare/ai-chat": "latest",
     "@cloudflare/kumo": "^2.5.2",
     "@cloudflare/think": "latest",
+    "@elemaudio/core": "^4.0.1",
+    "@elemaudio/web-renderer": "^4.0.3",
     "@phosphor-icons/react": "^2.1.10",
     "@streamdown/code": "^1.1.1",
+    "@tonaljs/tonal": "^4.10.0",
+    "@tonejs/midi": "^2.0.28",
+    "@xyflow/react": "^12.11.0",
     "agents": "latest",
     "ai": "^6.0.202",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "smplr": "^1.0.0",
     "streamdown": "^2.5.0",
-    "workers-ai-provider": "^3.2.0"
+    "tone": "^15.1.22",
+    "workers-ai-provider": "^3.2.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.40.2",
@@ -32,9 +44,12 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
+    "oxfmt": "^0.55.0",
+    "oxlint": "^1.70.0",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
+    "vitest": "^4.1.9",
     "wrangler": "^4.100.0"
   }
 }
