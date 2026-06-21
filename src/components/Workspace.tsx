@@ -23,26 +23,35 @@ import {
   BASS_STYLES,
   chordFunctions,
   chordRoots,
+  defaultEffects,
+  EFFECT_PRESETS,
   DRUM_STYLES,
   generateDrums,
   generateMelody,
   guessKey,
+  instrumentLabel,
+  INSTRUMENT_CATEGORIES,
   INSTRUMENTS,
   isChord,
   MELODY_STYLES,
   MIX_TRACKS,
+  MODULAR_VOICE_ID,
   parseProgression,
   songStateFromProgression,
   VIBES,
   type BassStyle,
   type DrumStyle,
   type DrumVoice,
+  type EffectPreset,
+  type EffectTrack,
   type HarmonicFunction,
   type MelodyStyle,
   type Mix,
   type Section,
   type SongState,
+  type TrackEffects,
 } from "../music/song";
+import { SYNTH_PRESETS, type SynthPreset } from "../modular/presets";
 
 const ROOTS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
 
@@ -62,6 +71,26 @@ const LANE_COLORS: Record<string, string> = {
   drums: "bg-violet-500/80",
   melody: "bg-emerald-500/80",
 };
+
+function InstrumentOptions() {
+  return (
+    <>
+      {INSTRUMENT_CATEGORIES.map((category) => {
+        const instruments = INSTRUMENTS.filter((instrument) => instrument.category === category.id);
+        if (instruments.length === 0) return null;
+        return (
+          <optgroup key={category.id} label={category.label}>
+            {instruments.map((instrument) => (
+              <option key={instrument.id} value={instrument.id}>
+                {instrument.label}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
+    </>
+  );
+}
 
 function TransportBar({
   isPlaying,
@@ -125,11 +154,7 @@ function TransportBar({
             onChange={(e) => onInstrumentChange(e.target.value)}
             className="px-2 py-1 rounded-md border border-kumo-line bg-kumo-elevated text-kumo-default text-sm outline-none focus:ring-2 focus:ring-kumo-ring"
           >
-            {INSTRUMENTS.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.label}
-              </option>
-            ))}
+            <InstrumentOptions />
           </select>
         </label>
         <div className="flex-1" />
@@ -570,6 +595,250 @@ function VibeBar({ song, onChange }: { song: SongState; onChange: (next: SongSta
   );
 }
 
+function clonePreset(preset: SynthPreset) {
+  return JSON.parse(JSON.stringify(preset.patch)) as SongState["patch"];
+}
+
+function InstrumentBrowser({
+  song,
+  onChange,
+}: {
+  song: SongState;
+  onChange: (next: SongState) => void;
+}) {
+  const applyInstrument = (instrument: string) => onChange({ ...song, instrument });
+  const applySynthPreset = (preset: SynthPreset) =>
+    onChange({
+      ...song,
+      instrument: MODULAR_VOICE_ID,
+      patch: clonePreset(preset),
+    });
+
+  return (
+    <section className="px-5 py-4 border-t border-kumo-line space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <Text size="xs" variant="secondary" bold>
+            Instrument Browser
+          </Text>
+          <p className="mt-1 text-xs text-kumo-inactive">
+            Curated sampled instruments are served locally; synth presets load editable modular
+            patches.
+          </p>
+        </div>
+        <Badge variant="secondary">{instrumentLabel(song.instrument)}</Badge>
+      </div>
+
+      <div className="space-y-3">
+        {INSTRUMENT_CATEGORIES.map((category) => {
+          const instruments = INSTRUMENTS.filter(
+            (instrument) => instrument.category === category.id,
+          );
+          if (instruments.length === 0) return null;
+          return (
+            <div key={category.id}>
+              <Text size="xs" variant="secondary" bold>
+                {category.label}
+              </Text>
+              <div className="mt-1.5 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {instruments.map((instrument) => {
+                  const active = song.instrument === instrument.id;
+                  return (
+                    <button
+                      key={instrument.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => applyInstrument(instrument.id)}
+                      className={`rounded-xl border px-3 py-2 text-left transition-colors ${
+                        active
+                          ? "border-kumo-contrast bg-kumo-contrast text-kumo-inverse"
+                          : "border-kumo-line bg-kumo-elevated text-kumo-default hover:border-kumo-accent"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold">{instrument.label}</span>
+                        <span
+                          className={`text-[10px] ${
+                            active ? "text-kumo-inverse/70" : "text-kumo-inactive"
+                          }`}
+                        >
+                          {instrument.kit === "FluidR3_GM" ? "FluidR3" : instrument.kit}
+                        </span>
+                      </div>
+                      <p
+                        className={`mt-1 line-clamp-2 text-[11px] ${
+                          active ? "text-kumo-inverse/70" : "text-kumo-inactive"
+                        }`}
+                      >
+                        {instrument.blurb}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div>
+        <Text size="xs" variant="secondary" bold>
+          Synth Presets
+        </Text>
+        <div className="mt-1.5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {SYNTH_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => applySynthPreset(preset)}
+              className={`rounded-xl border px-3 py-2 text-left transition-colors ${
+                song.instrument === MODULAR_VOICE_ID
+                  ? "border-kumo-line bg-kumo-elevated text-kumo-default hover:border-kumo-accent"
+                  : "border-kumo-line bg-kumo-elevated text-kumo-default hover:border-kumo-accent"
+              }`}
+            >
+              <div className="text-sm font-semibold">{preset.label}</div>
+              <p className="mt-1 line-clamp-3 text-[11px] text-kumo-inactive">{preset.blurb}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const EFFECT_SLIDERS: { id: keyof TrackEffects; label: string; min: number; max: number }[] = [
+  { id: "tone", label: "Tone", min: -1, max: 1 },
+  { id: "drive", label: "Drive", min: 0, max: 1 },
+  { id: "chorus", label: "Chorus", min: 0, max: 1 },
+  { id: "delay", label: "Delay", min: 0, max: 1 },
+  { id: "reverb", label: "Reverb", min: 0, max: 1 },
+];
+
+function EffectPresetCard({
+  preset,
+  onApply,
+}: {
+  preset: EffectPreset;
+  onApply: (preset: EffectPreset) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onApply(preset)}
+      className="rounded-xl border border-kumo-line bg-kumo-elevated px-3 py-2 text-left text-kumo-default transition-colors hover:border-kumo-accent"
+    >
+      <div className="text-sm font-semibold">{preset.label}</div>
+      <p className="mt-1 line-clamp-2 text-[11px] text-kumo-inactive">{preset.blurb}</p>
+    </button>
+  );
+}
+
+function EffectsPanel({
+  song,
+  onChange,
+}: {
+  song: SongState;
+  onChange: (next: SongState) => void;
+}) {
+  const effects = song.effects ?? defaultEffects;
+  const applyPreset = (preset: EffectPreset) => {
+    const next = { ...effects };
+    for (const [track, patch] of Object.entries(preset.effects) as [
+      EffectTrack,
+      Partial<TrackEffects>,
+    ][]) {
+      next[track] = { ...defaultEffects[track], ...patch };
+    }
+    onChange({ ...song, effects: next });
+  };
+  const setTrackEffect = (track: EffectTrack, key: keyof TrackEffects, value: number) =>
+    onChange({
+      ...song,
+      effects: {
+        ...effects,
+        [track]: { ...effects[track], [key]: value },
+      },
+    });
+
+  return (
+    <section className="px-5 py-4 border-t border-kumo-line space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <Text size="xs" variant="secondary" bold>
+            Effect Presets
+          </Text>
+          <p className="mt-1 text-xs text-kumo-inactive">
+            Shape sampled instruments, bass, and drums before they hit the mixer.
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onChange({ ...song, effects: defaultEffects })}
+          title="Reset every track to dry effects"
+        >
+          Dry
+        </Button>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {EFFECT_PRESETS.map((preset) => (
+          <EffectPresetCard key={preset.id} preset={preset} onApply={applyPreset} />
+        ))}
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-2">
+        {MIX_TRACKS.map((track) => (
+          <div key={track.id} className="rounded-xl border border-kumo-line bg-kumo-base/40 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <Text size="xs" variant="secondary" bold>
+                {track.label}
+              </Text>
+              <button
+                type="button"
+                onClick={() =>
+                  onChange({
+                    ...song,
+                    effects: { ...effects, [track.id]: defaultEffects[track.id] },
+                  })
+                }
+                className="text-[11px] text-kumo-inactive hover:text-kumo-accent"
+              >
+                reset
+              </button>
+            </div>
+            <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+              {EFFECT_SLIDERS.map((slider) => {
+                const value = effects[track.id][slider.id];
+                return (
+                  <label key={slider.id} className="flex items-center gap-2">
+                    <span className="w-12 text-[11px] text-kumo-subtle">{slider.label}</span>
+                    <input
+                      type="range"
+                      min={slider.min}
+                      max={slider.max}
+                      step={0.01}
+                      value={value}
+                      onChange={(e) => setTrackEffect(track.id, slider.id, Number(e.target.value))}
+                      className="min-w-0 flex-1 accent-kumo-accent"
+                    />
+                    <span className="w-8 text-right text-[10px] text-kumo-inactive tabular-nums">
+                      {slider.id === "tone"
+                        ? `${value > 0 ? "+" : ""}${Math.round(value * 100)}`
+                        : Math.round(value * 100)}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function BandPanel({ song, onChange }: { song: SongState; onChange: (next: SongState) => void }) {
   const { bass, drums, melody, groove } = song;
   return (
@@ -667,11 +936,7 @@ function BandPanel({ song, onChange }: { song: SongState; onChange: (next: SongS
                 }
                 className="px-2 py-1 rounded-md border border-kumo-line bg-kumo-elevated text-kumo-default text-xs outline-none focus:ring-2 focus:ring-kumo-ring"
               >
-                {INSTRUMENTS.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.label}
-                  </option>
-                ))}
+                <InstrumentOptions />
               </select>
             </label>
             <Button
@@ -935,6 +1200,8 @@ export function Workspace({
         playing={song.playing && !arrangementOn}
         bars={Math.max(chords.length, 1)}
       />
+      <InstrumentBrowser song={song} onChange={onChange} />
+      <EffectsPanel song={song} onChange={onChange} />
       <BandPanel song={song} onChange={onChange} />
       <Mixer song={song} onChange={onChange} />
       <VibeBar song={song} onChange={onChange} />

@@ -1,5 +1,6 @@
 import { summarizePatch } from "../modular/edit";
 import type { SongMeta } from "../../agents/studio/agent";
+import { EFFECT_PRESETS, instrumentLabel, MIX_TRACKS, normalizeEffects } from "./song";
 import type { SongState } from "./song";
 
 export type SearchDocInput = Pick<SongMeta, "title" | "description" | "tags" | "chatSummary">;
@@ -18,6 +19,7 @@ export type SongSearchDoc = {
     arrangement: string;
     band: string;
     sound: string;
+    effects: string;
     patch: string;
     chat: string;
   };
@@ -68,13 +70,41 @@ function tagFrom(value: string): string {
   return normalizeSearchText(value).replace(/\s+/g, "-");
 }
 
+function summarizeEffects(song: SongState): string {
+  const effects = normalizeEffects(song.effects);
+  const active = MIX_TRACKS.flatMap((track) => {
+    const fx = effects[track.id];
+    return [
+      Math.abs(fx.tone) > 0.15 &&
+        `${track.label.toLowerCase()} ${fx.tone < 0 ? "dark tone" : "bright tone"}`,
+      fx.drive > 0.12 && `${track.label.toLowerCase()} drive saturation gritty warm`,
+      fx.chorus > 0.12 && `${track.label.toLowerCase()} chorus wide lush`,
+      fx.delay > 0.12 && `${track.label.toLowerCase()} delay echo dub`,
+      fx.reverb > 0.12 && `${track.label.toLowerCase()} reverb hall spacious dreamy`,
+    ].filter(Boolean);
+  });
+  const matchingPresets = EFFECT_PRESETS.filter((preset) =>
+    Object.entries(preset.effects).every(([track, patch]) => {
+      const actual = effects[track as keyof typeof effects];
+      return Object.entries(patch).every(([key, value]) => {
+        const actualValue = actual[key as keyof typeof actual];
+        return typeof value === "number" && Math.abs(actualValue - value) < 0.02;
+      });
+    }),
+  ).map((preset) => `${preset.label} ${preset.id}`);
+  return [...matchingPresets, ...active].join(" ");
+}
+
 export function buildAutoSongDetails(song: SongState, doc: SongSearchDoc): AutoSongDetails {
   const mode = song.key.toLowerCase().includes("minor") ? "minor" : "major";
   const chordText = song.chords.length > 0 ? song.chords.join(" ") : "single-chord loop";
+  const chordSound = instrumentLabel(song.instrument);
+  const melodySound = instrumentLabel(song.melody.instrument);
+  const effects = summarizeEffects(song);
   const enabledParts = [
     song.bass.enabled && `${song.bass.style} bass`,
     song.drums.enabled && `${song.drums.style} drums`,
-    song.melody.enabled && `${song.melody.style} melody`,
+    song.melody.enabled && `${song.melody.style} ${melodySound} melody`,
     song.beat.enabled && "custom beat",
   ].filter(Boolean);
   const primaryPart = enabledParts[0] ?? "minimal arrangement";
@@ -82,6 +112,8 @@ export function buildAutoSongDetails(song: SongState, doc: SongSearchDoc): AutoS
   const description = [
     `${song.tempo} BPM ${mode} sketch`,
     `Chords: ${chordText}`,
+    `Sound: ${chordSound}`,
+    effects && `Effects: ${effects}`,
     enabledParts.length > 0 ? `Parts: ${enabledParts.join(", ")}` : "Sparse starting point",
     doc.fields.patch && `Patch: ${doc.fields.patch}`,
   ]
@@ -95,7 +127,9 @@ export function buildAutoSongDetails(song: SongState, doc: SongSearchDoc): AutoS
       song.drums.enabled && tagFrom(song.drums.style),
       song.melody.enabled && tagFrom(song.melody.style),
       song.beat.enabled && "beat-machine",
-      song.instrument && tagFrom(song.instrument),
+      song.instrument && tagFrom(chordSound),
+      effects && "effects",
+      song.melody.enabled && tagFrom(melodySound),
     ].filter((tag): tag is string => Boolean(tag)),
   ).slice(0, 8);
   return { title, description, tags };
@@ -117,6 +151,8 @@ export function mergeAutoSongDetails(
 }
 
 export function buildSongSearchDoc(meta: SearchDocInput, song: SongState): SongSearchDoc {
+  const chordSound = instrumentLabel(song.instrument);
+  const melodySound = instrumentLabel(song.melody.instrument);
   const arrangement =
     song.arrangement?.enabled && song.arrangement.sections.length > 0
       ? song.arrangement.sections
@@ -126,11 +162,12 @@ export function buildSongSearchDoc(meta: SearchDocInput, song: SongState): SongS
   const band = [
     song.bass.enabled ? `${song.bass.style} bass` : "bass off",
     song.drums.enabled ? `${song.drums.style} drums busy ${song.drums.busy}` : "drums off",
-    song.melody.enabled ? `${song.melody.style} melody ${song.melody.instrument}` : "melody off",
+    song.melody.enabled ? `${song.melody.style} melody ${melodySound}` : "melody off",
     song.beat.enabled ? "custom beat machine pattern" : "beat off",
     `swing ${Math.round(song.groove.swing * 100)} humanize ${Math.round(song.groove.humanize * 100)}`,
   ].join(" ");
-  const sound = `${song.instrument} ${song.mix ? "mixed" : ""}`;
+  const sound = `${chordSound} ${song.instrument} ${song.mix ? "mixed" : ""}`;
+  const effects = summarizeEffects(song);
   const patch = summarizePatch(song.patch);
   const chords = song.chords.join(" ");
   const summary = [
@@ -140,6 +177,7 @@ export function buildSongSearchDoc(meta: SearchDocInput, song: SongState): SongS
     arrangement !== "single loop" && `Arrangement ${arrangement}`,
     band,
     sound,
+    effects,
     patch,
     meta.chatSummary,
   ]
@@ -155,6 +193,7 @@ export function buildSongSearchDoc(meta: SearchDocInput, song: SongState): SongS
     arrangement,
     band,
     sound,
+    effects,
     patch,
     chat: meta.chatSummary,
   };
@@ -171,6 +210,7 @@ export function buildSongSearchDoc(meta: SearchDocInput, song: SongState): SongS
       fields.arrangement,
       fields.band,
       fields.sound,
+      fields.effects,
       fields.patch,
       fields.chat,
     ]

@@ -186,9 +186,7 @@ function GlobalSearch({
               Search failed. Try again in a moment.
             </div>
           ) : results.length === 0 ? (
-            <div className="px-3 py-3 text-xs text-kumo-inactive">
-              No matches for "{trimmed}".
-            </div>
+            <div className="px-3 py-3 text-xs text-kumo-inactive">No matches for "{trimmed}".</div>
           ) : (
             results.map(({ song, matchedFields, snippet }, index) => {
               const selected = index === highlightedIndex;
@@ -198,27 +196,29 @@ function GlobalSearch({
                   ? `Matched: ${matchedFields.slice(0, 3).join(", ")}`
                   : `${song.key} · ${song.tempo} BPM`);
               return (
-              <button
-                key={song.id}
-                id={`${listboxId}-option-${song.id}`}
-                aria-current={song.id === activeId ? "page" : undefined}
-                type="button"
-                onMouseEnter={() => setHighlightedIndex(index)}
-                onClick={() => selectResult(song.id)}
-                className={`block w-full px-3 py-2 text-left ${
-                  selected || song.id === activeId ? "bg-kumo-elevated" : "hover:bg-kumo-elevated"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="truncate text-sm font-medium text-kumo-default">{song.title}</div>
-                  <div className="shrink-0 text-[10px] tabular-nums text-kumo-inactive">
-                    {song.key} · {song.tempo} BPM
+                <button
+                  key={song.id}
+                  id={`${listboxId}-option-${song.id}`}
+                  aria-current={song.id === activeId ? "page" : undefined}
+                  type="button"
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                  onClick={() => selectResult(song.id)}
+                  className={`block w-full px-3 py-2 text-left ${
+                    selected || song.id === activeId ? "bg-kumo-elevated" : "hover:bg-kumo-elevated"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="truncate text-sm font-medium text-kumo-default">
+                      {song.title}
+                    </div>
+                    <div className="shrink-0 text-[10px] tabular-nums text-kumo-inactive">
+                      {song.key} · {song.tempo} BPM
+                    </div>
                   </div>
-                </div>
-                <div className="mt-0.5 line-clamp-2 text-[10px] text-kumo-inactive">
-                  {context}
-                </div>
-              </button>
+                  <div className="mt-0.5 line-clamp-2 text-[10px] text-kumo-inactive">
+                    {context}
+                  </div>
+                </button>
               );
             })
           )}
@@ -296,7 +296,8 @@ export function App() {
   useEffect(() => {
     const unlock = () => {
       setAudioState("running");
-      void engine.ensureStarted()
+      void engine
+        .ensureStarted()
         .then(() => setAudioState(engine.audioContextState))
         .catch(() => setAudioState(engine.audioContextState));
     };

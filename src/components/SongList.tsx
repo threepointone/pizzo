@@ -188,7 +188,7 @@ export function SongList({
                   ? "bg-kumo-contrast text-kumo-inverse"
                   : highlighted
                     ? "bg-kumo-elevated text-kumo-default"
-                  : "hover:bg-kumo-elevated text-kumo-default"
+                    : "hover:bg-kumo-elevated text-kumo-default"
               }`}
             >
               {editingId === song.id ? (

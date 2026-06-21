@@ -2,11 +2,14 @@ import * as Tone from "tone";
 import { Soundfont } from "smplr";
 import {
   BEATS_PER_BAR,
+  instrumentById,
   MODULAR_VOICE_ID,
   type DrumHit,
   type DrumVoice,
+  type Effects,
   type Mix,
   type SongDoc,
+  type TrackEffects,
 } from "../music/song";
 import { modularEngine } from "../modular/engine";
 
@@ -23,6 +26,25 @@ type ScheduledEvent = {
 };
 
 type ScheduledHit = { time: string; voice: DrumVoice; velocity: number };
+
+type EffectChain = {
+  input: GainNode;
+  tone: BiquadFilterNode;
+  drive: WaveShaperNode;
+  dryGain: GainNode;
+  chorusDelay: DelayNode;
+  chorusWet: GainNode;
+  chorusLfo: OscillatorNode;
+  chorusDepth: GainNode;
+  delaySend: GainNode;
+  delay: DelayNode;
+  delayFeedback: GainNode;
+  delayWet: GainNode;
+  reverbSend: GainNode;
+  reverb: ConvolverNode;
+  reverbWet: GainNode;
+  output: GainNode;
+};
 
 /** Synth drum kit + bass voice, built lazily from Tone primitives. */
 type Kit = {
@@ -41,12 +63,8 @@ function beatsToBarsBeats(beat: number): string {
   return `${bar}:${beatInBar}:0`;
 }
 
-/**
- * Local MusyngKite soundfonts live in `public/soundfonts/MusyngKite/`, served
- * at this path. mp3 is used for universal browser support.
- */
-const KIT_BASE = "/soundfonts/MusyngKite";
-const soundfontUrl = (name: string) => `${KIT_BASE}/${name}-mp3.js`;
+const soundfontUrl = (kit: "MusyngKite" | "FluidR3_GM", name: string) =>
+  `/soundfonts/${kit}/${name}-mp3.js`;
 
 /**
  * Tone.js drives timing (transport, tempo, loop); sound comes from `smplr`
@@ -67,6 +85,8 @@ class AudioEngine {
   private master: GainNode | null = null;
   /** Per-role gain nodes (chords/bass/drums/melody) → master, driven by the mixer. */
   private gains: Record<MixRole, GainNode> | null = null;
+  private effectChains: Record<MixRole, EffectChain> | null = null;
+  private reverbImpulse: AudioBuffer | null = null;
   /** Loop length (bars) of the last rendered doc — used to size an audio capture. */
   private loopBarsValue = 4;
   /** Humanize amount (0..1) applied live to note/drum timing + velocity. */
@@ -106,6 +126,140 @@ class AudioEngine {
       this.gains = { chords: make(), bass: make(), drums: make(), melody: make() };
     }
     return this.gains;
+  }
+
+  private makeDriveCurve(amount: number): Float32Array {
+    const samples = 512;
+    const curve = new Float32Array(samples);
+    const k = 1 + amount * 36;
+    for (let i = 0; i < samples; i++) {
+      const x = (i / (samples - 1)) * 2 - 1;
+      curve[i] = Math.tanh(k * x) / Math.tanh(k);
+    }
+    return curve;
+  }
+
+  private makeReverbImpulse(): AudioBuffer {
+    if (this.reverbImpulse) return this.reverbImpulse;
+    const ctx = this.rawContext;
+    const seconds = 2.2;
+    const length = Math.floor(ctx.sampleRate * seconds);
+    const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+    for (let ch = 0; ch < impulse.numberOfChannels; ch++) {
+      const data = impulse.getChannelData(ch);
+      for (let i = 0; i < length; i++) {
+        const decay = (1 - i / length) ** 2.4;
+        data[i] = (Math.random() * 2 - 1) * decay;
+      }
+    }
+    this.reverbImpulse = impulse;
+    return impulse;
+  }
+
+  private createEffectChain(role: MixRole): EffectChain {
+    const ctx = this.rawContext;
+    const input = ctx.createGain();
+    const tone = ctx.createBiquadFilter();
+    tone.type = "highshelf";
+    tone.frequency.value = 1400;
+    const drive = ctx.createWaveShaper();
+    drive.oversample = "2x";
+    const dryGain = ctx.createGain();
+
+    const chorusDelay = ctx.createDelay(0.05);
+    const chorusWet = ctx.createGain();
+    const chorusLfo = ctx.createOscillator();
+    const chorusDepth = ctx.createGain();
+    chorusDelay.delayTime.value = 0.012;
+    chorusLfo.connect(chorusDepth);
+    chorusDepth.connect(chorusDelay.delayTime);
+    chorusLfo.start();
+
+    const delaySend = ctx.createGain();
+    const delay = ctx.createDelay(1.2);
+    const delayFeedback = ctx.createGain();
+    const delayWet = ctx.createGain();
+    delay.delayTime.value = 0.28;
+    delay.connect(delayFeedback);
+    delayFeedback.connect(delay);
+
+    const reverbSend = ctx.createGain();
+    const reverb = ctx.createConvolver();
+    reverb.buffer = this.makeReverbImpulse();
+    const reverbWet = ctx.createGain();
+
+    const output = ctx.createGain();
+    input.connect(tone);
+    tone.connect(drive);
+    drive.connect(dryGain);
+    dryGain.connect(output);
+    drive.connect(chorusDelay);
+    chorusDelay.connect(chorusWet);
+    chorusWet.connect(output);
+    drive.connect(delaySend);
+    delaySend.connect(delay);
+    delay.connect(delayWet);
+    delayWet.connect(output);
+    drive.connect(reverbSend);
+    reverbSend.connect(reverb);
+    reverb.connect(reverbWet);
+    reverbWet.connect(output);
+    output.connect(this.ensureGains()[role]);
+
+    const chain = {
+      input,
+      tone,
+      drive,
+      dryGain,
+      chorusDelay,
+      chorusWet,
+      chorusLfo,
+      chorusDepth,
+      delaySend,
+      delay,
+      delayFeedback,
+      delayWet,
+      reverbSend,
+      reverb,
+      reverbWet,
+      output,
+    };
+    this.updateEffectChain(chain, { tone: 0, drive: 0, chorus: 0, delay: 0, reverb: 0 });
+    return chain;
+  }
+
+  private ensureEffectChains(): Record<MixRole, EffectChain> {
+    if (!this.effectChains) {
+      this.effectChains = {
+        chords: this.createEffectChain("chords"),
+        bass: this.createEffectChain("bass"),
+        drums: this.createEffectChain("drums"),
+        melody: this.createEffectChain("melody"),
+      };
+    }
+    return this.effectChains;
+  }
+
+  private updateEffectChain(chain: EffectChain, effects: TrackEffects): void {
+    const t = this.rawContext.currentTime;
+    chain.tone.gain.setTargetAtTime(effects.tone * 12, t, 0.02);
+    chain.drive.curve = this.makeDriveCurve(effects.drive);
+    chain.dryGain.gain.setTargetAtTime(0.9 - Math.min(0.25, effects.reverb * 0.12), t, 0.02);
+    chain.chorusWet.gain.setTargetAtTime(effects.chorus * 0.42, t, 0.02);
+    chain.chorusDepth.gain.setTargetAtTime(effects.chorus * 0.006, t, 0.02);
+    chain.chorusLfo.frequency.setTargetAtTime(0.35 + effects.chorus * 1.5, t, 0.02);
+    chain.delaySend.gain.setTargetAtTime(effects.delay * 0.7, t, 0.02);
+    chain.delayFeedback.gain.setTargetAtTime(0.18 + effects.delay * 0.5, t, 0.02);
+    chain.delayWet.gain.setTargetAtTime(0.62, t, 0.02);
+    chain.reverbSend.gain.setTargetAtTime(effects.reverb * 0.75, t, 0.02);
+    chain.reverbWet.gain.setTargetAtTime(0.5, t, 0.02);
+  }
+
+  applyEffects(effects: Effects): void {
+    const chains = this.ensureEffectChains();
+    for (const role of ["chords", "bass", "drums", "melody"] as const) {
+      this.updateEffectChain(chains[role], effects[role]);
+    }
   }
 
   /**
@@ -170,10 +324,12 @@ class AudioEngine {
 
     const promise = (async () => {
       try {
+        const instrument = instrumentById(name);
+        if (!instrument) throw new Error(`Unknown instrument "${name}"`);
         const inst = Soundfont(this.rawContext, {
-          instrumentUrl: soundfontUrl(name),
+          instrumentUrl: soundfontUrl(instrument.kit, name),
           volume: 100,
-          destination: this.ensureGains()[role],
+          destination: this.ensureEffectChains()[role].input,
         });
         await inst.ready;
         this.instruments.set(cacheKey, inst);
@@ -191,8 +347,8 @@ class AudioEngine {
   /** Build the synth drum kit + bass voice once, lazily. */
   private ensureKit(): Kit {
     if (this.kit) return this.kit;
-    const gains = this.ensureGains();
-    const drumBus = gains.drums;
+    const effects = this.ensureEffectChains();
+    const drumBus = effects.drums.input;
     const kick = new Tone.MembraneSynth({
       octaves: 6,
       pitchDecay: 0.05,
@@ -228,7 +384,7 @@ class AudioEngine {
         octaves: 2.6,
       },
       envelope: { attack: 0.01, decay: 0.2, sustain: 0.8, release: 0.3 },
-    }).connect(gains.bass);
+    }).connect(effects.bass.input);
     bass.volume.value = -4;
 
     this.kit = { kick, snare, hat, openhat, clap, bass };

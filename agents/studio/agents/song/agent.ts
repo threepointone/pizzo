@@ -10,10 +10,12 @@ import {
   chordFunctions,
   DRUM_STYLES,
   defaultArrangement,
+  defaultEffects,
   defaultGroove,
   defaultMelody,
   defaultMix,
   defaultSongState,
+  EFFECT_PRESETS,
   emptyBeat,
   euclid,
   euclidBeat,
@@ -22,6 +24,7 @@ import {
   isChord,
   makeSection,
   MELODY_STYLES,
+  normalizeEffects,
   parseProgression,
   reharmonize,
   SEQ_STEPS,
@@ -33,10 +36,13 @@ import {
   type Beat,
   type DrumStyle,
   type DrumVoice,
+  type EffectPreset,
+  type EffectTrack,
   type MelodyStyle,
   type ReharmonizeStyle,
   type Section,
   type SongState,
+  type TrackEffects,
 } from "../../../../src/music/song";
 import { MODULE_TYPES, defaultVoice } from "../../../../src/modular/registry";
 import {
@@ -117,6 +123,22 @@ function resolveMelodyStyle(input?: string): MelodyStyle {
   return (match?.id as MelodyStyle) ?? "flowing";
 }
 
+function resolveEffectPreset(input: string): EffectPreset | null {
+  const q = input.trim().toLowerCase();
+  const norm = q.replace(/[^a-z0-9]/g, "");
+  return (
+    EFFECT_PRESETS.find((preset) => preset.id === q) ??
+    EFFECT_PRESETS.find((preset) => preset.id.replace(/[^a-z0-9]/g, "") === norm) ??
+    EFFECT_PRESETS.find(
+      (preset) => preset.label.toLowerCase().replace(/[^a-z0-9]/g, "") === norm,
+    ) ??
+    EFFECT_PRESETS.find(
+      (preset) => preset.label.toLowerCase().includes(q) || preset.blurb.toLowerCase().includes(q),
+    ) ??
+    null
+  );
+}
+
 /** Parse a 16-step pattern string ("x.x.x.x.") into booleans. */
 function parsePattern(input: string): boolean[] {
   const chars = input.replace(/\s+/g, "").slice(0, SEQ_STEPS).split("");
@@ -184,6 +206,7 @@ export class Song extends Think<Env, SongState> {
       `For a whole genre feel in one move, use applyVibe with a name (${VIBES.map((v) => v.id).join("/")}). It sets tempo + sounds + drum/bass/melody styles (and a fitting progression unless an arrangement is active). Great for "make it lo-fi" / "give me a synthwave vibe".`,
       "TEACHING is part of the mission — the user is an amateur without much theory. Use explainTheory to break down their progression (key, Roman numerals, Tonic/Subdominant/Dominant function) in plain language. reharmonize (jazz = sevenths, simple = triads) gives their chords a fresh harmonic color. suggestNextChord proposes musical next chords; explain WHY each works, then offer to add it. Always teach a little when you make harmonic changes.",
       "To BALANCE the mix, use setMix (per-track volume/mute/solo for chords/bass/drums/melody, or master level) — 'turn down the drums', 'solo the bass', 'mute the melody'. To shape the FEEL, use setGroove (swing shuffles off-beats; humanize loosens timing/velocity) — 'add some swing', 'make it groovier', 'tighten it up' (0).",
+      `To color sampled instruments/the band, use applyEffectPreset (${EFFECT_PRESETS.map((p) => p.id).join("/")}) or setEffects for per-track tone/drive/chorus/delay/reverb. Effects are post-instrument and pre-mixer.`,
       "",
       "Pizzo has two surfaces: the Chord Lab (progression + GM instrument) and the Modular surface (a patchable synth voice built from modules).",
       "When the user asks to design/tweak a SYNTH SOUND on the modular surface (brighter, fatter, slower attack, add an LFO, etc.), use the modular tools (setSynthParam, addSynthModule, connectSynth, removeSynthModule, resetSynth). Prefer setSynthParam for timbral tweaks. e.g. 'brighter' → raise the filter cutoff; 'snappier' → shorter attack/decay; 'wobble' → add/raise an LFO into filter cutoff.",
@@ -205,6 +228,12 @@ export class Song extends Think<Env, SongState> {
           : "off (single loop)"
       }`,
       `- Groove: swing ${Math.round((s.groove?.swing ?? 0) * 100)}%, humanize ${Math.round((s.groove?.humanize ?? 0) * 100)}%`,
+      `- Effects: ${["chords", "bass", "drums", "melody"]
+        .map((t) => {
+          const fx = normalizeEffects(s.effects)[t as EffectTrack];
+          return `${t} tone ${Math.round(fx.tone * 100)} drive ${Math.round(fx.drive * 100)} chorus ${Math.round(fx.chorus * 100)} delay ${Math.round(fx.delay * 100)} reverb ${Math.round(fx.reverb * 100)}`;
+        })
+        .join("; ")}`,
       `- Mix: ${["chords", "bass", "drums", "melody"]
         .map((t) => {
           const ch = (s.mix ?? defaultMix)[t as "chords"];
@@ -720,6 +749,68 @@ export class Song extends Think<Env, SongState> {
           const next = { ...mix, [track]: ch };
           this.setState({ ...s, mix: next });
           return { track, ...ch };
+        },
+      }),
+
+      applyEffectPreset: tool({
+        description: `Apply a named effect preset to the relevant tracks. Available presets: ${EFFECT_PRESETS.map(
+          (preset) => `${preset.id} (${preset.label})`,
+        ).join(
+          ", ",
+        )}. Use for requests like "make it dreamy", "add lo-fi tape", "dub echo", "wide chorus", or "tighten the bass".`,
+        inputSchema: z.object({
+          preset: z.string().describe("Effect preset id or label."),
+        }),
+        execute: async ({ preset }) => {
+          const fxPreset = resolveEffectPreset(preset);
+          if (!fxPreset) {
+            return {
+              error: `Unknown effect preset. Try one of: ${EFFECT_PRESETS.map((p) => p.label).join(", ")}.`,
+            };
+          }
+          const s = this.song();
+          const effects = normalizeEffects(s.effects);
+          const next = { ...effects };
+          for (const [track, patch] of Object.entries(fxPreset.effects) as [
+            EffectTrack,
+            Partial<TrackEffects>,
+          ][]) {
+            next[track] = { ...defaultEffects[track], ...patch };
+          }
+          this.setState({ ...s, effects: next });
+          return { preset: fxPreset.id, effects: next };
+        },
+      }),
+
+      setEffects: tool({
+        description:
+          "Set per-track effects before the mixer. Track is chords, bass, drums, or melody. tone ranges -1 dark to +1 bright; drive/chorus/delay/reverb range 0..1. Use for precise requests like 'more reverb on piano', 'less delay on melody', 'darken the drums', or 'remove effects from bass'.",
+        inputSchema: z.object({
+          track: z.enum(["chords", "bass", "drums", "melody"]),
+          tone: z.number().min(-1).max(1).optional(),
+          drive: z.number().min(0).max(1).optional(),
+          chorus: z.number().min(0).max(1).optional(),
+          delay: z.number().min(0).max(1).optional(),
+          reverb: z.number().min(0).max(1).optional(),
+          reset: z.boolean().optional().describe("Set this track back to dry/neutral effects."),
+        }),
+        execute: async ({ track, tone, drive, chorus, delay, reverb, reset }) => {
+          const s = this.song();
+          const effects = normalizeEffects(s.effects);
+          const current = reset ? defaultEffects[track] : effects[track];
+          const nextTrack = normalizeEffects({
+            [track]: {
+              ...current,
+              ...(tone !== undefined ? { tone } : {}),
+              ...(drive !== undefined ? { drive } : {}),
+              ...(chorus !== undefined ? { chorus } : {}),
+              ...(delay !== undefined ? { delay } : {}),
+              ...(reverb !== undefined ? { reverb } : {}),
+            },
+          })[track];
+          const next = { ...effects, [track]: nextTrack };
+          this.setState({ ...s, effects: next });
+          return { track, effects: nextTrack };
         },
       }),
 

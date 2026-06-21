@@ -81,6 +81,18 @@ export type Mix = {
   master: number;
 };
 
+export type EffectTrack = keyof Omit<Mix, "master">;
+export type TrackEffects = {
+  /** -1 dark, 0 neutral, +1 bright. */
+  tone: number;
+  /** 0 clean, 1 saturated. */
+  drive: number;
+  chorus: number;
+  delay: number;
+  reverb: number;
+};
+export type Effects = Record<EffectTrack, TrackEffects>;
+
 /**
  * Groove feel applied at playback time (not baked into the generators):
  * - `swing` (0..1) delays every other 8th note for a shuffle.
@@ -145,6 +157,8 @@ export type SongState = {
   arrangement: Arrangement;
   /** Per-track volume / mute / solo + master level. */
   mix: Mix;
+  /** Per-track Web Audio effects applied after instruments and before the mixer. */
+  effects: Effects;
   /** Swing + humanize feel, applied live by the engine. */
   groove: Groove;
   /** Modular-surface synth patch (node graph). Shared/persisted like the rest. */
@@ -187,21 +201,183 @@ export type SongDoc = {
 /** Special instrument id: route the chords through the Modular synth patch. */
 export const MODULAR_VOICE_ID = "modular_voice";
 
+export type InstrumentCategory = "keys" | "guitar" | "orchestral" | "synth" | "texture";
+export type InstrumentDef = {
+  id: string;
+  label: string;
+  category: InstrumentCategory;
+  blurb: string;
+  kit: "MusyngKite" | "FluidR3_GM";
+  /** Bundled instruments load from public/ so core sounds work offline/local. */
+  bundled: true;
+};
+
 /**
  * Instruments offered in the UI picker. The GM ids are valid smplr soundfont
  * names; `modular_voice` is special-cased to play through the modular patch.
  */
-export const INSTRUMENTS: { id: string; label: string }[] = [
-  { id: "acoustic_grand_piano", label: "Grand Piano" },
-  { id: "electric_piano_1", label: "Electric Piano" },
-  { id: "rock_organ", label: "Organ" },
-  { id: "acoustic_guitar_nylon", label: "Nylon Guitar" },
-  { id: "vibraphone", label: "Vibraphone" },
-  { id: "string_ensemble_1", label: "Strings" },
-  { id: "pad_2_warm", label: "Warm Pad" },
-  { id: "choir_aahs", label: "Choir" },
-  { id: MODULAR_VOICE_ID, label: "Modular Synth" },
+export const INSTRUMENTS: InstrumentDef[] = [
+  {
+    id: "acoustic_grand_piano",
+    label: "Grand Piano",
+    category: "keys",
+    blurb: "Clean all-purpose piano for writing and ballads.",
+    kit: "MusyngKite",
+    bundled: true,
+  },
+  {
+    id: "electric_piano_1",
+    label: "Electric Piano",
+    category: "keys",
+    blurb: "Warm tine-style keys for lo-fi, soul, and house.",
+    kit: "MusyngKite",
+    bundled: true,
+  },
+  {
+    id: "clavinet",
+    label: "Clavinet",
+    category: "keys",
+    blurb: "Percussive funk keyboard with bright attack.",
+    kit: "FluidR3_GM",
+    bundled: true,
+  },
+  {
+    id: "drawbar_organ",
+    label: "Drawbar Organ",
+    category: "keys",
+    blurb: "Classic sustained organ for gospel and rock parts.",
+    kit: "FluidR3_GM",
+    bundled: true,
+  },
+  {
+    id: "rock_organ",
+    label: "Rock Organ",
+    category: "keys",
+    blurb: "Gritty organ that cuts through dense arrangements.",
+    kit: "MusyngKite",
+    bundled: true,
+  },
+  {
+    id: "acoustic_guitar_nylon",
+    label: "Nylon Guitar",
+    category: "guitar",
+    blurb: "Soft plucked nylon-string guitar for bossa and sketches.",
+    kit: "MusyngKite",
+    bundled: true,
+  },
+  {
+    id: "electric_guitar_clean",
+    label: "Clean Guitar",
+    category: "guitar",
+    blurb: "Chimey electric guitar for indie and pop voicings.",
+    kit: "FluidR3_GM",
+    bundled: true,
+  },
+  {
+    id: "electric_bass_finger",
+    label: "Finger Bass",
+    category: "guitar",
+    blurb: "Round electric bass tone for chord stabs or melodies.",
+    kit: "FluidR3_GM",
+    bundled: true,
+  },
+  {
+    id: "vibraphone",
+    label: "Vibraphone",
+    category: "orchestral",
+    blurb: "Glassy mallet sound for hooks and ambient motifs.",
+    kit: "MusyngKite",
+    bundled: true,
+  },
+  {
+    id: "flute",
+    label: "Flute",
+    category: "orchestral",
+    blurb: "Breathy lead voice for light melodic lines.",
+    kit: "FluidR3_GM",
+    bundled: true,
+  },
+  {
+    id: "cello",
+    label: "Cello",
+    category: "orchestral",
+    blurb: "Expressive low string voice for slow lines.",
+    kit: "FluidR3_GM",
+    bundled: true,
+  },
+  {
+    id: "string_ensemble_1",
+    label: "Strings",
+    category: "orchestral",
+    blurb: "Section strings for cinematic pads and harmonic beds.",
+    kit: "MusyngKite",
+    bundled: true,
+  },
+  {
+    id: "choir_aahs",
+    label: "Choir",
+    category: "texture",
+    blurb: "Vocal pad texture for cinematic and ambient sketches.",
+    kit: "MusyngKite",
+    bundled: true,
+  },
+  {
+    id: "pad_2_warm",
+    label: "Warm Pad",
+    category: "texture",
+    blurb: "Soft synth pad from the bundled soundfont set.",
+    kit: "MusyngKite",
+    bundled: true,
+  },
+  {
+    id: "synth_strings_1",
+    label: "Synth Strings",
+    category: "synth",
+    blurb: "Bright synthetic string machine tone.",
+    kit: "FluidR3_GM",
+    bundled: true,
+  },
+  {
+    id: "synth_bass_1",
+    label: "Synth Bass",
+    category: "synth",
+    blurb: "Punchy sampled synth bass for riffs and hooks.",
+    kit: "FluidR3_GM",
+    bundled: true,
+  },
+  {
+    id: "lead_2_sawtooth",
+    label: "Saw Lead",
+    category: "synth",
+    blurb: "Cutting sampled saw lead for pop and synthwave hooks.",
+    kit: "FluidR3_GM",
+    bundled: true,
+  },
+  {
+    id: MODULAR_VOICE_ID,
+    label: "Modular Synth",
+    category: "synth",
+    blurb: "Live Elementary patch from the modular surface.",
+    kit: "MusyngKite",
+    bundled: true,
+  },
 ];
+
+export function instrumentById(id: string): InstrumentDef | undefined {
+  return INSTRUMENTS.find((instrument) => instrument.id === id);
+}
+
+export const INSTRUMENT_CATEGORIES: { id: InstrumentCategory; label: string }[] = [
+  { id: "keys", label: "Keys" },
+  { id: "guitar", label: "Guitar/Bass" },
+  { id: "orchestral", label: "Orchestral" },
+  { id: "texture", label: "Textures" },
+  { id: "synth", label: "Synths" },
+];
+
+export function instrumentLabel(id: string): string {
+  return INSTRUMENTS.find((instrument) => instrument.id === id)?.label ?? id.replace(/_/g, " ");
+}
 
 export const BEATS_PER_BAR = 4;
 
@@ -763,6 +939,21 @@ export const defaultMix: Mix = {
   master: 0.9,
 };
 
+export const defaultTrackEffects: TrackEffects = {
+  tone: 0,
+  drive: 0,
+  chorus: 0,
+  delay: 0,
+  reverb: 0,
+};
+
+export const defaultEffects: Effects = {
+  chords: defaultTrackEffects,
+  bass: defaultTrackEffects,
+  drums: defaultTrackEffects,
+  melody: defaultTrackEffects,
+};
+
 export const defaultGroove: Groove = { swing: 0, humanize: 0 };
 
 /** Mixer roles, in display order, with labels for the UI. */
@@ -772,6 +963,89 @@ export const MIX_TRACKS: { id: keyof Omit<Mix, "master">; label: string }[] = [
   { id: "drums", label: "Drums" },
   { id: "melody", label: "Melody" },
 ];
+
+export type EffectPreset = {
+  id: string;
+  label: string;
+  blurb: string;
+  effects: Partial<Record<EffectTrack, Partial<TrackEffects>>>;
+};
+
+export const EFFECT_PRESETS: EffectPreset[] = [
+  {
+    id: "dream-hall",
+    label: "Dream Hall",
+    blurb: "Wide, soft room for piano, strings, and pads.",
+    effects: {
+      chords: { reverb: 0.58, delay: 0.08, chorus: 0.18, tone: 0.1 },
+      melody: { reverb: 0.5, delay: 0.14, chorus: 0.12, tone: 0.08 },
+    },
+  },
+  {
+    id: "lofi-tape",
+    label: "Lo-fi Tape",
+    blurb: "Darker tone, light wobble, and warm saturation.",
+    effects: {
+      chords: { tone: -0.38, drive: 0.22, chorus: 0.34, delay: 0.12, reverb: 0.18 },
+      melody: { tone: -0.22, drive: 0.14, chorus: 0.22, delay: 0.1, reverb: 0.16 },
+    },
+  },
+  {
+    id: "dub-echo",
+    label: "Dub Echo",
+    blurb: "Big repeats with darker tone for stabs and hooks.",
+    effects: {
+      chords: { tone: -0.18, drive: 0.08, delay: 0.66, reverb: 0.28 },
+      melody: { tone: -0.08, delay: 0.52, reverb: 0.22 },
+    },
+  },
+  {
+    id: "wide-chorus",
+    label: "Wide Chorus",
+    blurb: "Instant stereo-style width for keys, guitars, and strings.",
+    effects: {
+      chords: { chorus: 0.62, reverb: 0.22, tone: 0.06 },
+      melody: { chorus: 0.48, reverb: 0.18 },
+    },
+  },
+  {
+    id: "gritty-organ",
+    label: "Gritty Organ",
+    blurb: "Saturation and brightness for organs, clav, and leads.",
+    effects: {
+      chords: { drive: 0.52, tone: 0.28, reverb: 0.12 },
+      melody: { drive: 0.32, tone: 0.22, delay: 0.08 },
+    },
+  },
+  {
+    id: "tight-bass",
+    label: "Tight Bass",
+    blurb: "Focused bass with mild drive and darker highs.",
+    effects: {
+      bass: { drive: 0.28, tone: -0.24, chorus: 0, delay: 0, reverb: 0 },
+    },
+  },
+];
+
+export function normalizeEffects(
+  effects?: Partial<Record<EffectTrack, Partial<TrackEffects>>>,
+): Effects {
+  const clamp = (value: unknown, min = 0, max = 1) =>
+    Math.max(min, Math.min(max, typeof value === "number" ? value : 0));
+  const normalizeTrack = (track?: Partial<TrackEffects>): TrackEffects => ({
+    tone: clamp(track?.tone, -1, 1),
+    drive: clamp(track?.drive),
+    chorus: clamp(track?.chorus),
+    delay: clamp(track?.delay),
+    reverb: clamp(track?.reverb),
+  });
+  return {
+    chords: normalizeTrack(effects?.chords),
+    bass: normalizeTrack(effects?.bass),
+    drums: normalizeTrack(effects?.drums),
+    melody: normalizeTrack(effects?.melody),
+  };
+}
 
 let sectionCounter = 0;
 /** Build a section, defaulting its voice toggles from the current song. */
@@ -834,6 +1108,7 @@ export const defaultSongState: SongState = {
   beat: emptyBeat(),
   arrangement: defaultArrangement,
   mix: defaultMix,
+  effects: defaultEffects,
   groove: defaultGroove,
   patch: defaultVoice(),
 };
@@ -856,6 +1131,7 @@ export function songStateFromProgression(chords: string[], prev?: Partial<SongSt
     beat: prev?.beat ?? emptyBeat(),
     arrangement: prev?.arrangement ?? defaultArrangement,
     mix: prev?.mix ?? defaultMix,
+    effects: normalizeEffects(prev?.effects),
     groove: prev?.groove ?? defaultGroove,
     patch: prev?.patch ?? defaultVoice(),
   };

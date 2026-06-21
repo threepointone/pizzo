@@ -12,6 +12,7 @@ import {
   defaultSongState,
   guessKey,
   makeSection,
+  normalizeEffects,
   parseProgression,
   songDocFromState,
   type Arrangement,
@@ -34,6 +35,7 @@ function normalizeSong(next: Partial<SongState>): SongState {
     beat: next.beat ?? defaultSongState.beat,
     arrangement: next.arrangement ?? defaultSongState.arrangement,
     mix: next.mix ?? defaultSongState.mix,
+    effects: normalizeEffects(next.effects),
     groove: next.groove ?? defaultSongState.groove,
     patch: next.patch ?? defaultSongState.patch,
   };
@@ -193,7 +195,9 @@ function SongDetails({
               />
             </div>
             <p className="text-[10px] text-kumo-inactive">
-              {dirty ? "Saving changes..." : "Manual edits autosave. Auto fields update from the song."}
+              {dirty
+                ? "Saving changes..."
+                : "Manual edits autosave. Auto fields update from the song."}
             </p>
             {song.chatSummary && (
               <p className="rounded-lg bg-kumo-elevated px-3 py-2 text-xs text-kumo-subtle">
@@ -205,7 +209,12 @@ function SongDetails({
                 Refresh chat summary
               </Button>
               <div className="flex gap-2">
-                <Button variant="primary" size="sm" onClick={flushBeforeClose} disabled={!title.trim()}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={flushBeforeClose}
+                  disabled={!title.trim()}
+                >
                   Done
                 </Button>
               </div>
@@ -281,7 +290,13 @@ function deriveArrangementSongState(song: SongState, arrangement: Arrangement): 
   };
 }
 
-function ArrangementEditor({ song, onChange }: { song: SongState; onChange: (song: SongState) => void }) {
+function ArrangementEditor({
+  song,
+  onChange,
+}: {
+  song: SongState;
+  onChange: (song: SongState) => void;
+}) {
   const arrangement = song.arrangement ?? defaultSongState.arrangement;
   const current =
     arrangement.sections.find((section) => section.id === arrangement.current) ??
@@ -343,7 +358,11 @@ function ArrangementEditor({ song, onChange }: { song: SongState; onChange: (son
 
   const addSection = () => {
     const nextNumber = arrangement.sections.length + 1;
-    const section = makeSection(`Section ${nextNumber}`, current?.chords ?? song.chords, current ?? undefined);
+    const section = makeSection(
+      `Section ${nextNumber}`,
+      current?.chords ?? song.chords,
+      current ?? undefined,
+    );
     applyArrangement({
       enabled: true,
       sections: [...arrangement.sections, section],
@@ -681,7 +700,8 @@ export function SongView({
     void engine
       .renderDoc(songDocFromState(song))
       .catch(() => {
-        if (!cancelled) setTransportNote("Audio render failed. Try changing the song or reloading.");
+        if (!cancelled)
+          setTransportNote("Audio render failed. Try changing the song or reloading.");
       })
       .finally(() => {
         if (!cancelled) setIsRendering(false);
@@ -695,6 +715,11 @@ export function SongView({
     engine.applyMix(song.mix);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mixKey]);
+  const effectsKey = JSON.stringify(song.effects);
+  useEffect(() => {
+    engine.applyEffects(song.effects);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectsKey]);
   useEffect(() => {
     engine.setGroove(song.groove.swing, song.groove.humanize);
   }, [song.groove.swing, song.groove.humanize]);
@@ -784,6 +809,7 @@ export function SongView({
     song.beat,
     song.arrangement,
     song.mix,
+    song.effects,
     song.groove,
     song.patch,
   ]);
