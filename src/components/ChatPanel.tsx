@@ -7,6 +7,7 @@ import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import { Badge, Button, Empty, InputArea, Surface, Text } from "@cloudflare/kumo";
 import {
+  CaretRightIcon,
   GearIcon,
   PaperPlaneRightIcon,
   RobotIcon,
@@ -15,6 +16,7 @@ import {
   XCircleIcon,
 } from "@phosphor-icons/react";
 import type { SongState } from "../music/song";
+import { LAUNCH_INTENTS } from "../music/intents";
 import type { ConnectionStatus } from "../client";
 
 type AgentConnection = ReturnType<typeof useAgent<SongState>>;
@@ -53,14 +55,129 @@ function shouldShowStreamedTextPart(part: { text: string; state?: "streaming" | 
   return part.text.length > 0 || part.state === "streaming";
 }
 
+function summarizeToolAction(
+  toolName: string,
+  input?: Record<string, unknown>,
+  output?: unknown,
+  isError = false,
+): string {
+  if (isError) return `${toolName} needs attention`;
+  const out = output as Record<string, unknown> | undefined;
+  const progression = Array.isArray(out?.chords)
+    ? out.chords.join(" ")
+    : Array.isArray(input?.chords)
+      ? input.chords.join(" ")
+      : typeof input?.chords === "string"
+        ? input.chords
+        : "";
+  switch (toolName) {
+    case "setProgression":
+      return progression ? `Changed progression to ${progression}` : "Changed the progression";
+    case "transposeSong":
+      return `Transposed the song ${input?.semitones ?? ""} semitones`;
+    case "setTempo":
+      return `Set tempo to ${out?.tempo ?? input?.bpm ?? "new"} BPM`;
+    case "setInstrument":
+      return `Changed sound to ${out?.instrument ?? input?.instrument ?? "a new instrument"}`;
+    case "addDrums":
+      return `Added ${String(out?.drums ?? input?.style ?? "drums")} drums`;
+    case "removeDrums":
+      return "Removed drums";
+    case "addBassline":
+      return `Added ${String(input?.style ?? "bass")} bassline`;
+    case "removeBassline":
+      return "Removed bass";
+    case "addMelody":
+    case "regenerateMelody":
+      return "Updated the melody";
+    case "removeMelody":
+      return "Removed melody";
+    case "programBeat":
+    case "euclidBeat":
+      return "Updated the beat pattern";
+    case "clearBeat":
+      return "Returned drums to the style groove";
+    case "setLoopMode":
+      return input?.loop === false ? "Set playback to play once" : "Set playback to loop";
+    case "setArrangement":
+    case "addSection":
+      return "Updated the song arrangement";
+    case "clearArrangement":
+      return "Returned to a single loop";
+    case "applyVibe":
+      return `Applied ${String(out?.vibe ?? input?.name ?? input?.vibe ?? "a")} vibe`;
+    case "applyEffectPreset":
+      return `Applied ${String(out?.preset ?? input?.preset ?? "an")} effect preset`;
+    case "setEffects":
+      return `Shaped ${String(input?.track ?? "track")} effects`;
+    case "setMix":
+      return `Adjusted ${String(input?.track ?? "the")} mix`;
+    case "setGroove":
+      return "Adjusted swing and human feel";
+    case "setSynthParam":
+    case "addSynthModule":
+    case "connectSynth":
+    case "removeSynthModule":
+    case "resetSynth":
+      return "Updated the modular synth";
+    case "explainTheory":
+    case "analyzeSong":
+    case "suggestNextChord":
+    case "reharmonize":
+      return "Analyzed the harmony";
+    case "play":
+      return "Started playback";
+    case "stop":
+      return "Stopped playback";
+    default:
+      return toolName.replace(/([A-Z])/g, " $1").trim();
+  }
+}
+
+function summarizeToolDelta(
+  toolName: string,
+  input?: Record<string, unknown>,
+  output?: unknown,
+): string | null {
+  const out = output as Record<string, unknown> | undefined;
+  if (Array.isArray(out?.before) && Array.isArray(out?.after)) {
+    return `${out.before.join(" ")} -> ${out.after.join(" ")}`;
+  }
+  if (Array.isArray(out?.chords)) return `Now: ${out.chords.join(" ")}`;
+  if (Array.isArray(input?.chords)) return `Requested: ${input.chords.join(" ")}`;
+  if (toolName === "setTempo" && (out?.tempo || input?.bpm)) {
+    return `Tempo is ${out?.tempo ?? input?.bpm} BPM`;
+  }
+  if (toolName === "setArrangement" && Array.isArray(out?.sections)) {
+    return `Sections: ${out.sections.join(" -> ")}`;
+  }
+  if (toolName === "setMix" && input?.track) {
+    return `${String(input.track)} mix updated`;
+  }
+  if (toolName === "setEffects" && input?.track) {
+    return `${String(input.track)} effects updated`;
+  }
+  return null;
+}
+
 export function ChatPanel({
   agent,
+  song,
   connectionStatus,
   onChatSummary,
+  onBeforeUserMessage,
+  onUndoLastChange,
+  lastActionLabel,
+  onCollapse,
 }: {
   agent: AgentConnection;
+  song: SongState;
   connectionStatus: ConnectionStatus;
   onChatSummary?: (summary: string) => void;
+  onBeforeUserMessage: (snapshot: SongState) => void;
+  onUndoLastChange: () => void;
+  lastActionLabel?: string;
+  onCollapse: () => void;
 }) {
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -96,9 +213,10 @@ export function ChatPanel({
   const send = useCallback(() => {
     const text = input.trim();
     if (!text || isStreaming) return;
+    onBeforeUserMessage(song);
     setInput("");
     sendMessage({ role: "user", parts: [{ type: "text", text }] });
-  }, [input, isStreaming, sendMessage]);
+  }, [input, isStreaming, onBeforeUserMessage, sendMessage, song]);
 
   return (
     <aside className="w-[380px] shrink-0 flex flex-col h-full border-l border-kumo-line bg-kumo-base">
@@ -110,22 +228,48 @@ export function ChatPanel({
           </Text>
           <ConnectionIndicator status={connectionStatus} />
         </div>
-        <Button
-          variant="ghost"
-          shape="square"
-          aria-label="Clear conversation"
-          icon={<TrashIcon size={16} />}
-          onClick={() => clearHistory()}
-        />
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            shape="square"
+            aria-label="Clear conversation"
+            icon={<TrashIcon size={16} />}
+            onClick={() => clearHistory()}
+          />
+          <Button
+            variant="ghost"
+            shape="square"
+            aria-label="Collapse assistant sidebar"
+            title="Collapse assistant sidebar"
+            icon={<CaretRightIcon size={16} weight="bold" />}
+            onClick={onCollapse}
+          />
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && (
-          <Empty
-            icon={<RobotIcon size={28} />}
-            title="Talk to your studio"
-            description="Try “give me a dreamy progression in D”, “make it sadder”, “up a step”, or “play it.”"
-          />
+          <div className="space-y-3">
+            <Empty
+              icon={<RobotIcon size={28} />}
+              title="Talk to your studio"
+              description="Start from a direction, then ask for changes like “make it sadder”, “up a step”, or “add a bridge.”"
+            />
+            <div className="flex flex-wrap gap-1.5">
+              {LAUNCH_INTENTS.filter((intent) => intent.id !== "blank")
+                .slice(0, 6)
+                .map((intent) => (
+                  <button
+                    key={intent.id}
+                    type="button"
+                    onClick={() => setInput(intent.prompt)}
+                    className="rounded-full border border-kumo-line bg-kumo-elevated px-2.5 py-1 text-xs text-kumo-subtle hover:border-kumo-accent hover:text-kumo-accent"
+                  >
+                    {intent.label}
+                  </button>
+                ))}
+            </div>
+          </div>
         )}
 
         {messages.map((message, index) => {
@@ -145,6 +289,11 @@ export function ChatPanel({
           return (
             <div key={message.id} className="space-y-2">
               {message.parts.map((part, partIndex) => {
+                const lastToolPartIndex = message.parts.reduce(
+                  (latest, candidate, candidateIndex) =>
+                    isToolUIPart(candidate) ? candidateIndex : latest,
+                  -1,
+                );
                 if (part.type === "text") {
                   if (!shouldShowStreamedTextPart(part)) return null;
                   const isLastTextPart = message.parts
@@ -171,9 +320,14 @@ export function ChatPanel({
                   return (
                     <div key={partIndex} className="flex justify-start">
                       <Surface className="max-w-[90%] px-3.5 py-2 rounded-xl ring ring-kumo-line opacity-70">
-                        <div className="whitespace-pre-wrap text-xs text-kumo-subtle italic min-h-[1em]">
-                          {part.text || (part.state === "streaming" ? "…" : null)}
-                        </div>
+                        <details>
+                          <summary className="cursor-pointer text-xs text-kumo-subtle">
+                            Thinking
+                          </summary>
+                          <div className="mt-2 whitespace-pre-wrap text-xs text-kumo-subtle italic min-h-[1em]">
+                            {part.text || (part.state === "streaming" ? "…" : null)}
+                          </div>
+                        </details>
                       </Surface>
                     </div>
                   );
@@ -189,6 +343,10 @@ export function ChatPanel({
                   part.state === "input-available" || part.state === "input-streaming";
                 const isDone = part.state === "output-available";
                 const isError = part.state === "output-error";
+                const summary = summarizeToolAction(toolName, toolInput, toolOutput, isError);
+                const delta = summarizeToolDelta(toolName, toolInput, toolOutput);
+                const canUndoThis =
+                  isDone && isLastAssistant && partIndex === lastToolPartIndex && lastActionLabel;
 
                 return (
                   <div key={part.toolCallId} className="flex justify-start">
@@ -203,25 +361,42 @@ export function ChatPanel({
                           />
                         )}
                         <Text size="xs" variant="secondary" bold>
-                          {isRunning ? `Running ${toolName}…` : toolName}
+                          {isRunning ? `Working: ${summary}` : summary}
                         </Text>
                         {isDone && <Badge variant="secondary">Done</Badge>}
                         {isError && <Badge variant="destructive">Error</Badge>}
                       </div>
-                      {toolInput != null && (
-                        <pre className="mt-1 p-2 rounded-lg bg-kumo-elevated text-xs font-mono text-kumo-subtle overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-all">
-                          {formatToolPayload(toolInput)}
-                        </pre>
+                      {delta && <p className="text-xs text-kumo-inactive">{delta}</p>}
+                      {canUndoThis && (
+                        <button
+                          type="button"
+                          onClick={onUndoLastChange}
+                          className="mt-1 rounded-md border border-kumo-line px-2 py-1 text-xs text-kumo-subtle hover:border-kumo-accent hover:text-kumo-accent"
+                        >
+                          Undo: {lastActionLabel}
+                        </button>
                       )}
-                      {errorText && (
-                        <pre className="mt-1 p-2 rounded-lg bg-red-50 dark:bg-red-950/20 text-xs font-mono text-red-600 dark:text-red-400 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-all">
-                          {errorText}
-                        </pre>
-                      )}
-                      {toolOutput != null && (
-                        <pre className="mt-1 p-2 rounded-lg bg-kumo-elevated text-xs font-mono text-kumo-subtle overflow-x-auto max-h-60 overflow-y-auto whitespace-pre-wrap break-all">
-                          {formatToolPayload(toolOutput)}
-                        </pre>
+                      {(toolInput != null || toolOutput != null || errorText) && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-xs text-kumo-inactive">
+                            Details
+                          </summary>
+                          {toolInput != null && (
+                            <pre className="mt-1 p-2 rounded-lg bg-kumo-elevated text-xs font-mono text-kumo-subtle overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-all">
+                              {formatToolPayload(toolInput)}
+                            </pre>
+                          )}
+                          {errorText && (
+                            <pre className="mt-1 p-2 rounded-lg bg-red-50 dark:bg-red-950/20 text-xs font-mono text-red-600 dark:text-red-400 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-all">
+                              {errorText}
+                            </pre>
+                          )}
+                          {toolOutput != null && (
+                            <pre className="mt-1 p-2 rounded-lg bg-kumo-elevated text-xs font-mono text-kumo-subtle overflow-x-auto max-h-60 overflow-y-auto whitespace-pre-wrap break-all">
+                              {formatToolPayload(toolOutput)}
+                            </pre>
+                          )}
+                        </details>
                       )}
                     </Surface>
                   </div>

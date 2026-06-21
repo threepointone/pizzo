@@ -5,6 +5,7 @@ import {
   euclid,
   euclidBeat,
   generateDrums,
+  beatToHits,
   styleToBeat,
 } from "./song";
 import {
@@ -76,6 +77,18 @@ describe("beat helpers", () => {
     const beat = euclidBeat(emptyBeat(), "kick", 3, 8);
     expect(beat.enabled).toBe(true);
     expect(pattern(beat.rows.kick)).toBe("x..x..x.x..x..x.");
+  });
+
+  it("renders accented beat steps louder than normal steps", () => {
+    const beat = emptyBeat();
+    beat.enabled = true;
+    beat.rows.kick[0] = true;
+    beat.rows.kick[4] = true;
+    beat.accents!.kick[4] = true;
+
+    const hits = beatToHits(beat, 1).filter((hit) => hit.voice === "kick");
+    expect(hits).toHaveLength(2);
+    expect(hits[1].velocity).toBeGreaterThan(hits[0].velocity);
   });
 
   it("generates deterministic drum style hits and beat grids", () => {

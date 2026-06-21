@@ -40,6 +40,7 @@ import type { ParamDef } from "../modular/registry";
 import { addModule as addModuleToPatch } from "../modular/edit";
 import { useToast } from "./Toast";
 import { PRESETS, isPatch, loadPatch, savePatch, savedPatchNames } from "../modular/presets";
+import type { PresetCategory } from "../modular/presets";
 import type { ModuleType, Patch, PatchConnection, PatchModule } from "../modular/types";
 
 type ModuleNodeData = { module: PatchModule };
@@ -48,6 +49,16 @@ type Actions = {
   setParam: (moduleId: string, paramId: string, value: number | string) => void;
 };
 const ActionsContext = createContext<Actions>({ setParam: () => {} });
+
+const PRESET_CATEGORIES: PresetCategory[] = [
+  "Starter",
+  "Bass",
+  "Keys",
+  "Pads",
+  "Leads",
+  "Textures",
+  "Percussion",
+];
 
 // ---- patch <-> react-flow translation -------------------------------------
 
@@ -443,9 +454,13 @@ function AudioInControl({
 export function ModularSurface({
   patch,
   onChange,
+  isUsedInChordLab,
+  onUseInChordLab,
 }: {
   patch: Patch;
   onChange: (next: Patch) => void;
+  isUsedInChordLab: boolean;
+  onUseInChordLab: () => void;
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<ModuleNodeData>>(patchToNodes(patch));
   const [edges, setEdges, onEdgesChange] = useEdgesState(patchToEdges(patch));
@@ -715,6 +730,21 @@ export function ModularSurface({
   }, [noteOn, noteOff]);
 
   const selected = edges.find((e) => e.id === selectedEdge);
+  const presetsByCategory = useMemo(
+    () =>
+      PRESET_CATEGORIES.map((category) => ({
+        category,
+        presets: PRESETS.filter((preset) => preset.category === category),
+      })).filter((group) => group.presets.length > 0),
+    [],
+  );
+  const templatePresets = useMemo(
+    () =>
+      (["Bass", "Pads", "Leads", "Textures"] as PresetCategory[])
+        .map((category) => PRESETS.find((preset) => preset.category === category))
+        .filter((preset): preset is (typeof PRESETS)[number] => Boolean(preset)),
+    [],
+  );
 
   return (
     <ActionsContext.Provider value={{ setParam }}>
@@ -727,8 +757,16 @@ export function ModularSurface({
             <Text size="xs" variant="secondary">
               patch a synth from modules — drag from a port to wire it up
             </Text>
+            <Badge variant={isUsedInChordLab ? "primary" : "secondary"}>
+              {isUsedInChordLab ? "Used by Chord Lab" : "Patch ready"}
+            </Badge>
           </div>
           <div className="flex items-center gap-2">
+            {!isUsedInChordLab && (
+              <Button variant="primary" size="sm" onClick={onUseInChordLab}>
+                Use in Chord Lab
+              </Button>
+            )}
             <select
               aria-label="Add module"
               value=""
@@ -754,14 +792,16 @@ export function ModularSurface({
               }}
               className="px-2 py-1 rounded-md border border-kumo-line bg-kumo-elevated text-kumo-default text-xs outline-none focus:ring-2 focus:ring-kumo-ring"
             >
-              <option value="">Load patch…</option>
-              <optgroup label="Presets">
-                {PRESETS.map((p) => (
-                  <option key={p.id} value={`preset:${p.id}`}>
-                    {p.label}
-                  </option>
-                ))}
-              </optgroup>
+              <option value="">Use patch in Modular…</option>
+              {presetsByCategory.map(({ category, presets }) => (
+                <optgroup key={category} label={category}>
+                  {presets.map((p) => (
+                    <option key={p.id} value={`preset:${p.id}`}>
+                      {p.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
               {savedNames.length > 0 && (
                 <optgroup label="Saved">
                   {savedNames.map((n) => (
@@ -803,6 +843,38 @@ export function ModularSurface({
             >
               Reset
             </Button>
+          </div>
+        </div>
+
+        <div className="border-b border-kumo-line bg-kumo-elevated px-5 py-3">
+          <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
+            <div className="rounded-lg border border-kumo-line bg-kumo-base px-4 py-3">
+              <Text size="xs" variant="secondary" bold>
+                What this controls
+              </Text>
+              <p className="mt-1 text-xs text-kumo-inactive">
+                This designs one playable synth voice. Load a patch here to edit it, then choose
+                “Modular Synth” in Chord Lab, or use the button above, to make this exact voice the
+                chord sound.
+              </p>
+            </div>
+            <div className="rounded-lg border border-kumo-line bg-kumo-base px-4 py-3">
+              <Text size="xs" variant="secondary" bold>
+                Patch Templates
+              </Text>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {templatePresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => applyPatch(preset.make())}
+                    className="rounded-full border border-kumo-line bg-kumo-elevated px-2.5 py-1 text-xs text-kumo-default hover:border-kumo-accent"
+                  >
+                    {preset.category}: {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 

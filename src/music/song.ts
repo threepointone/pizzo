@@ -110,6 +110,8 @@ export type Beat = {
   enabled: boolean;
   steps: number;
   rows: Record<DrumVoice, boolean[]>;
+  /** Optional per-step accents for hand-programmed beats. */
+  accents?: Record<DrumVoice, boolean[]>;
 };
 
 /** A single percussion hit on the 16th-note grid. */
@@ -667,8 +669,10 @@ export function generateMelody(
 /** An empty step-sequencer grid (all voices, all steps off). */
 export function emptyBeat(): Beat {
   const rows = {} as Record<DrumVoice, boolean[]>;
+  const accents = {} as Record<DrumVoice, boolean[]>;
   for (const v of BEAT_VOICES) rows[v] = Array(SEQ_STEPS).fill(false);
-  return { enabled: false, steps: SEQ_STEPS, rows };
+  for (const v of BEAT_VOICES) accents[v] = Array(SEQ_STEPS).fill(false);
+  return { enabled: false, steps: SEQ_STEPS, rows, accents };
 }
 
 /** Render an editable beat grid into looping drum hits across all bars. */
@@ -678,12 +682,14 @@ export function beatToHits(beat: Beat, bars: number): DrumHit[] {
   for (let bar = 0; bar < bars; bar++) {
     for (const voice of BEAT_VOICES) {
       const row = beat.rows[voice] ?? [];
+      const accents = beat.accents?.[voice] ?? [];
       row.forEach((on, step) => {
         if (on) {
+          const baseVelocity = DRUM_VELOCITY[voice];
           hits.push({
             voice,
             startBeat: bar * BEATS_PER_BAR + step * stepBeats,
-            velocity: DRUM_VELOCITY[voice],
+            velocity: accents[step] ? Math.min(1, baseVelocity * 1.18) : baseVelocity,
           });
         }
       });

@@ -17,8 +17,13 @@ export type ModuleType =
   | "vca"
   | "adsr"
   | "lfo"
+  | "sampleHold"
+  | "sequencer"
+  | "slew"
   | "delay"
   | "reverb"
+  | "wavefolder"
+  | "chorus"
   | "mixer"
   | "output";
 

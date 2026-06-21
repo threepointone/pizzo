@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Text } from "@cloudflare/kumo";
 import {
+  CaretLeftIcon,
   CopyIcon,
   MagnifyingGlassIcon,
   PencilSimpleIcon,
@@ -21,6 +22,7 @@ export function SongList({
   onDuplicate,
   onDelete,
   onSearch,
+  onCollapse,
 }: {
   songs: SongMeta[];
   activeId: string | null;
@@ -30,6 +32,7 @@ export function SongList({
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
   onSearch: (query: string) => Promise<SongSearchResult[]>;
+  onCollapse: () => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -98,9 +101,20 @@ export function SongList({
   return (
     <aside className="w-56 shrink-0 flex flex-col h-full border-r border-kumo-line bg-kumo-base">
       <div className="px-3 py-3 border-b border-kumo-line flex items-center justify-between">
-        <Text size="sm" bold>
-          Songs
-        </Text>
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            shape="square"
+            size="sm"
+            aria-label="Collapse song sidebar"
+            title="Collapse song sidebar"
+            icon={<CaretLeftIcon size={15} weight="bold" />}
+            onClick={onCollapse}
+          />
+          <Text size="sm" bold>
+            Songs
+          </Text>
+        </div>
         <Button
           variant="ghost"
           shape="square"

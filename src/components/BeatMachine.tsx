@@ -89,6 +89,7 @@ export function BeatMachine({
     steps: 16,
     rotate: 0,
   });
+  const [accentMode, setAccentMode] = useState(false);
 
   // Drive the playhead while the transport runs.
   const raf = useRef(0);
@@ -110,12 +111,21 @@ export function BeatMachine({
   const toggle = useCallback(
     (voice: DrumVoice, i: number) => {
       const rows = { ...beat.rows };
+      const accents = { ...(beat.accents ?? emptyBeat().accents) };
       const row = [...(rows[voice] ?? [])];
-      row[i] = !row[i];
+      const accentRow = [...(accents[voice] ?? Array(SEQ_STEPS).fill(false))];
+      if (accentMode) {
+        row[i] = true;
+        accentRow[i] = !accentRow[i];
+      } else {
+        row[i] = !row[i];
+        if (!row[i]) accentRow[i] = false;
+      }
       rows[voice] = row;
-      setBeat({ ...beat, rows, enabled: true });
+      accents[voice] = accentRow;
+      setBeat({ ...beat, rows, accents, enabled: true });
     },
-    [beat, setBeat],
+    [accentMode, beat, setBeat],
   );
 
   const clear = useCallback(() => setBeat(emptyBeat()), [setBeat]);
@@ -141,6 +151,11 @@ export function BeatMachine({
           <Badge variant={beat.enabled ? "primary" : "secondary"}>
             {beat.enabled ? "Pattern on" : "Pattern off"}
           </Badge>
+          {beat.enabled && (
+            <Button variant="ghost" size="sm" onClick={() => setBeat({ ...beat, enabled: false })}>
+              Use style groove
+            </Button>
+          )}
           <div className="flex-1" />
           <Button
             variant="secondary"
@@ -167,6 +182,48 @@ export function BeatMachine({
         </Text>
         <Text size="xs" variant="secondary">
           click cells to program a 16-step groove — it drives the drums on every surface
+        </Text>
+      </div>
+      <div className="mx-5 mt-3 rounded-lg border border-kumo-line bg-kumo-base px-4 py-3">
+        <Text size="xs" variant="secondary" bold>
+          What this controls
+        </Text>
+        <p className="mt-1 text-xs text-kumo-inactive">
+          This grid is the drum override for the whole song. When a pattern is on, Chord Lab shows
+          the same custom beat instead of the selected drum style.
+        </p>
+      </div>
+
+      <div className="mx-5 mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-kumo-line bg-kumo-base px-4 py-3">
+        <Text size="xs" variant="secondary" bold>
+          Edit Mode
+        </Text>
+        <button
+          type="button"
+          aria-pressed={!accentMode}
+          onClick={() => setAccentMode(false)}
+          className={`rounded-full border px-2.5 py-1 text-xs ${
+            !accentMode
+              ? "border-kumo-contrast bg-kumo-contrast text-kumo-inverse"
+              : "border-kumo-line bg-kumo-elevated text-kumo-default hover:border-kumo-accent"
+          }`}
+        >
+          Steps
+        </button>
+        <button
+          type="button"
+          aria-pressed={accentMode}
+          onClick={() => setAccentMode(true)}
+          className={`rounded-full border px-2.5 py-1 text-xs ${
+            accentMode
+              ? "border-kumo-contrast bg-kumo-contrast text-kumo-inverse"
+              : "border-kumo-line bg-kumo-elevated text-kumo-default hover:border-kumo-accent"
+          }`}
+        >
+          Accents
+        </button>
+        <Text size="xs" variant="secondary">
+          Accent mode makes active hits louder without changing the pattern.
         </Text>
       </div>
 
@@ -234,13 +291,14 @@ export function BeatMachine({
               <div className="flex gap-1">
                 {Array.from({ length: SEQ_STEPS }, (_, i) => {
                   const on = beat.rows[voice]?.[i] ?? false;
+                  const accented = beat.accents?.[voice]?.[i] ?? false;
                   const isBeatStart = i % 4 === 0;
                   const isHead = i === step;
                   return (
                     <button
                       key={i}
                       type="button"
-                      aria-label={`${VOICE_LABELS[voice]} step ${i + 1}`}
+                      aria-label={`${VOICE_LABELS[voice]} step ${i + 1}${accented ? " accented" : ""}`}
                       aria-pressed={on}
                       onClick={() => toggle(voice, i)}
                       className={`h-8 w-8 rounded-md border transition-colors ${
@@ -249,8 +307,12 @@ export function BeatMachine({
                           : isBeatStart
                             ? "bg-kumo-base border-kumo-line"
                             : "bg-kumo-elevated border-kumo-line/50"
-                      } ${isHead ? "ring-2 ring-kumo-accent" : ""}`}
-                    />
+                      } ${isHead ? "ring-2 ring-kumo-accent" : ""} ${
+                        accented ? "shadow-[inset_0_0_0_3px_rgba(255,255,255,0.55)]" : ""
+                      }`}
+                    >
+                      {accented && <span className="sr-only">accented</span>}
+                    </button>
                   );
                 })}
               </div>

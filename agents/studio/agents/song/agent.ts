@@ -44,6 +44,7 @@ import {
   type SongState,
   type TrackEffects,
 } from "../../../../src/music/song";
+import { LAUNCH_INTENTS } from "../../../../src/music/intents";
 import { MODULE_TYPES, defaultVoice } from "../../../../src/modular/registry";
 import {
   addModule,
@@ -197,6 +198,7 @@ export class Song extends Think<Env, SongState> {
       "You work by calling tools that change the live song. Never claim you changed something without calling the matching tool.",
       "Prefer making concrete edits over long explanations. Keep replies short and encouraging.",
       "When the user describes a vibe (sad, dreamy, triumphant, lofi…), translate it into a real chord progression in a fitting key and call setProgression.",
+      `Common launch intents: ${LAUNCH_INTENTS.map((intent) => `${intent.label} = ${intent.prompt}`).join(" | ")}. Use applyVibe plus concrete tools so chat-created starts match the UI cards.`,
       "To change the sound/timbre of the CHORDS, call setInstrument with one of the available instruments.",
       "To 'build a band' / add a groove: call addDrums (pick a style fitting the vibe) and addBassline (walking for jazzy, root/octaves for pop/rock). Use busy 0–1 on drums for how energetic. removeDrums/removeBassline strip them back.",
       "For a custom beat, use programBeat with 16-step 'x.'-patterns per voice (kick/snare/hat/openhat/clap); it overrides the style groove. clearBeat reverts.",
@@ -206,6 +208,7 @@ export class Song extends Think<Env, SongState> {
       `For a whole genre feel in one move, use applyVibe with a name (${VIBES.map((v) => v.id).join("/")}). It sets tempo + sounds + drum/bass/melody styles (and a fitting progression unless an arrangement is active). Great for "make it lo-fi" / "give me a synthwave vibe".`,
       "TEACHING is part of the mission — the user is an amateur without much theory. Use explainTheory to break down their progression (key, Roman numerals, Tonic/Subdominant/Dominant function) in plain language. reharmonize (jazz = sevenths, simple = triads) gives their chords a fresh harmonic color. suggestNextChord proposes musical next chords; explain WHY each works, then offer to add it. Always teach a little when you make harmonic changes.",
       "To BALANCE the mix, use setMix (per-track volume/mute/solo for chords/bass/drums/melody, or master level) — 'turn down the drums', 'solo the bass', 'mute the melody'. To shape the FEEL, use setGroove (swing shuffles off-beats; humanize loosens timing/velocity) — 'add some swing', 'make it groovier', 'tighten it up' (0).",
+      "Use setLoopMode when the user asks to loop forever or play the song once.",
       `To color sampled instruments/the band, use applyEffectPreset (${EFFECT_PRESETS.map((p) => p.id).join("/")}) or setEffects for per-track tone/drive/chorus/delay/reverb. Effects are post-instrument and pre-mixer.`,
       "",
       "Pizzo has two surfaces: the Chord Lab (progression + GM instrument) and the Modular surface (a patchable synth voice built from modules).",
@@ -352,6 +355,17 @@ export class Song extends Think<Env, SongState> {
         execute: async () => {
           this.setState({ ...this.song(), playing: false });
           return { playing: false };
+        },
+      }),
+
+      setLoopMode: tool({
+        description: "Choose whether playback loops forever or plays through once and stops.",
+        inputSchema: z.object({
+          loop: z.boolean().describe("true = loop forever, false = play once"),
+        }),
+        execute: async ({ loop }) => {
+          this.setState({ ...this.song(), loopSong: loop });
+          return { loopSong: loop };
         },
       }),
 

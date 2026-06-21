@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useAgent } from "agents/react";
 import { Badge, Button } from "@cloudflare/kumo";
-import { MagnifyingGlassIcon, MoonIcon, SunIcon, WaveformIcon, XIcon } from "@phosphor-icons/react";
+import {
+  CaretRightIcon,
+  MagnifyingGlassIcon,
+  MoonIcon,
+  PlusIcon,
+  SunIcon,
+  WaveformIcon,
+  XIcon,
+} from "@phosphor-icons/react";
 import { SongList } from "./components/SongList";
 import { SongView } from "./components/SongView";
 import { useToast } from "./components/Toast";
@@ -13,6 +21,7 @@ type Surface = "chords" | "beats" | "modular";
 
 const STORAGE_KEY = "pizzo-session";
 const ACTIVE_SONG_KEY = "pizzo-active-song";
+const SIDEBAR_COLLAPSED_KEY = "pizzo-song-sidebar-collapsed";
 
 function getSessionId(): string {
   const stored = localStorage.getItem(STORAGE_KEY);
@@ -39,6 +48,40 @@ function ModeToggle() {
       onClick={() => setMode((m) => (m === "light" ? "dark" : "light"))}
       icon={mode === "light" ? <MoonIcon size={16} /> : <SunIcon size={16} />}
     />
+  );
+}
+
+function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+      <div className="w-full max-w-md rounded-2xl border border-kumo-line bg-kumo-base p-4 shadow-xl">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-kumo-default">Keyboard Shortcuts</h2>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+          <dt className="rounded bg-kumo-elevated px-2 py-1 font-mono text-xs text-kumo-subtle">
+            Space
+          </dt>
+          <dd className="text-kumo-inactive">Play or stop the current song.</dd>
+          <dt className="rounded bg-kumo-elevated px-2 py-1 font-mono text-xs text-kumo-subtle">
+            Cmd K
+          </dt>
+          <dd className="text-kumo-inactive">Search songs from anywhere.</dd>
+          <dt className="rounded bg-kumo-elevated px-2 py-1 font-mono text-xs text-kumo-subtle">
+            ?
+          </dt>
+          <dd className="text-kumo-inactive">Open this shortcut help.</dd>
+          <dt className="rounded bg-kumo-elevated px-2 py-1 font-mono text-xs text-kumo-subtle">
+            A-K
+          </dt>
+          <dd className="text-kumo-inactive">Play the Modular keyboard when typing is inactive.</dd>
+        </dl>
+      </div>
+    </div>
   );
 }
 
@@ -129,7 +172,7 @@ function GlobalSearch({
   return (
     <div className="relative w-[360px] max-w-[42vw]">
       <label className="relative block">
-        <span className="sr-only">Search songs and commands</span>
+        <span className="sr-only">Search songs</span>
         <MagnifyingGlassIcon
           size={14}
           className="absolute left-2.5 top-1/2 -translate-y-1/2 text-kumo-inactive"
@@ -230,7 +273,7 @@ function GlobalSearch({
             }}
             className="block w-full border-t border-kumo-line px-3 py-2 text-left text-xs text-kumo-inactive hover:bg-kumo-elevated"
           >
-            Press Enter in chat to ask the assistant about a song.
+            Search uses titles, descriptions, tags, chords, sounds, effects, and recent chat.
           </button>
         </div>
       )}
@@ -248,6 +291,10 @@ export function App() {
   const [surface, setSurface] = useState<Surface>("chords");
   const [gotState, setGotState] = useState(false);
   const [audioState, setAudioState] = useState<AudioContextState>("suspended");
+  const [songSidebarCollapsed, setSongSidebarCollapsed] = useState(
+    () => localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true",
+  );
+  const [helpOpen, setHelpOpen] = useState(false);
   const seededRef = useRef(false);
 
   const studio = useAgent<StudioState>({
@@ -291,6 +338,10 @@ export function App() {
     if (activeSongId) localStorage.setItem(ACTIVE_SONG_KEY, activeSongId);
   }, [activeSongId]);
 
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(songSidebarCollapsed));
+  }, [songSidebarCollapsed]);
+
   // Resume the AudioContext on the first user interaction anywhere, so that
   // playback triggered later (e.g. by the chat agent) can actually start.
   useEffect(() => {
@@ -307,6 +358,21 @@ export function App() {
       window.removeEventListener("pointerdown", unlock);
       window.removeEventListener("keydown", unlock);
     };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "?" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (target?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+        return;
+      }
+      event.preventDefault();
+      setHelpOpen((open) => !open);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   const handleCreate = useCallback(async () => {
@@ -440,20 +506,55 @@ export function App() {
             onSearch={handleSearchSongs}
           />
           <ModeToggle />
+          <Button
+            variant="ghost"
+            shape="square"
+            aria-label="Keyboard shortcuts"
+            onClick={() => setHelpOpen(true)}
+          >
+            ?
+          </Button>
         </div>
       </header>
 
       <div className="flex-1 flex min-h-0">
-        <SongList
-          songs={songs}
-          activeId={activeSongId}
-          onSelect={setActiveSongId}
-          onCreate={() => void handleCreate()}
-          onRename={handleRename}
-          onDuplicate={(id) => void handleDuplicate(id)}
-          onDelete={handleDelete}
-          onSearch={handleSearchSongs}
-        />
+        {songSidebarCollapsed ? (
+          <aside
+            className="w-12 shrink-0 flex flex-col items-center gap-2 border-r border-kumo-line bg-kumo-base px-1.5 py-3"
+            aria-label="Collapsed song sidebar"
+          >
+            <Button
+              variant="ghost"
+              shape="square"
+              size="sm"
+              aria-label="Expand song sidebar"
+              title="Expand song sidebar"
+              icon={<CaretRightIcon size={15} weight="bold" />}
+              onClick={() => setSongSidebarCollapsed(false)}
+            />
+            <Button
+              variant="ghost"
+              shape="square"
+              size="sm"
+              aria-label="New song"
+              title="New song"
+              icon={<PlusIcon size={15} weight="bold" />}
+              onClick={() => void handleCreate()}
+            />
+          </aside>
+        ) : (
+          <SongList
+            songs={songs}
+            activeId={activeSongId}
+            onSelect={setActiveSongId}
+            onCreate={() => void handleCreate()}
+            onRename={handleRename}
+            onDuplicate={(id) => void handleDuplicate(id)}
+            onDelete={handleDelete}
+            onSearch={handleSearchSongs}
+            onCollapse={() => setSongSidebarCollapsed(true)}
+          />
+        )}
         {activeSongId && activeSong ? (
           <SongView
             key={activeSongId}
@@ -475,6 +576,7 @@ export function App() {
           </div>
         )}
       </div>
+      <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }

@@ -139,6 +139,39 @@ function compileVoice(patch: Patch, vi: number, ctx: Voice, sampleRate: number):
         return el.mul(wave, psm(m, "depth", 0.5));
       }
 
+      case "sampleHold": {
+        const trig = inputSignal(m.id, "trig") ?? el.train(psm(m, "rate", 2));
+        const src =
+          inputSignal(m.id, "in") ?? el.sub(el.mul(el.rand({ key: `${m.id}:rand:${vi}` }), 2), 1);
+        const held = el.latch(trig, src);
+        return el.add(psm(m, "offset", 0), el.mul(held, psm(m, "depth", 0.5)));
+      }
+
+      case "sequencer": {
+        const steps = Math.max(1, Math.min(8, Math.round(num(m, "steps", 8))));
+        const phase = el.mul(el.phasor(psm(m, "rate", 4)), el.const({ value: steps }));
+        const step = el.floor(phase);
+        if (port === "gate") {
+          return el.le(el.mod(phase, el.const({ value: 1 })), psm(m, "gate", 0.45));
+        }
+        const values = Array.from({ length: 8 }, (_, i) => num(m, `s${i + 1}`, 0));
+        const terms = values
+          .slice(0, steps)
+          .map((value, i) =>
+            el.select(
+              el.eq(step, el.const({ value: i })),
+              el.const({ value }),
+              el.const({ value: 0 }),
+            ),
+          );
+        return terms.reduce((a, b) => el.add(a, b));
+      }
+
+      case "slew": {
+        const input = inputSignal(m.id, "in") ?? el.const({ value: 0 });
+        return el.smooth(el.tau2pole(psm(m, "time", 0.08)), input);
+      }
+
       case "delay": {
         const input = inputSignal(m.id, "in") ?? el.const({ value: 0 });
         const lenSamples = Math.max(
@@ -152,6 +185,29 @@ function compileVoice(patch: Patch, vi: number, ctx: Voice, sampleRate: number):
           input,
         );
         const mix = psm(m, "mix", 0.3);
+        return el.add(el.mul(input, el.sub(el.const({ value: 1 }), mix)), el.mul(wet, mix));
+      }
+
+      case "wavefolder": {
+        const input = inputSignal(m.id, "in") ?? el.const({ value: 0 });
+        const folded = el.sin(el.add(el.mul(input, psm(m, "fold", 3)), psm(m, "bias", 0)));
+        return el.mul(folded, psm(m, "level", 0.65));
+      }
+
+      case "chorus": {
+        const input = inputSignal(m.id, "in") ?? el.const({ value: 0 });
+        const baseSamples = Math.max(
+          1,
+          Math.min(1 << 12, Math.round(num(m, "delay", 0.014) * sampleRate)),
+        );
+        const depthSamples = Math.max(1, Math.round(0.006 * sampleRate));
+        const lfo = el.mul(el.add(el.cycle(psm(m, "rate", 0.7)), el.const({ value: 1 })), 0.5);
+        const len = el.add(
+          el.const({ key: `${m.id}:chorusBase`, value: baseSamples }),
+          el.mul(lfo, el.mul(psm(m, "depth", 0.45), el.const({ value: depthSamples }))),
+        );
+        const wet = el.delay({ size: 1 << 12, key: `${m.id}:chorus:${vi}` }, len, 0, input);
+        const mix = psm(m, "mix", 0.35);
         return el.add(el.mul(input, el.sub(el.const({ value: 1 }), mix)), el.mul(wet, mix));
       }
 
