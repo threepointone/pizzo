@@ -1,5 +1,8 @@
 # Pizzo
 
+<img width="1024" height="572" alt="image" src="https://github.com/user-attachments/assets/7375b2a1-80eb-46dd-b571-791065818dfc" />
+
+
 **An AI-assisted, web-based music studio.** Pizzo isn't an audio _generator_ —
 it's a MIDI/arrangement workstation where the AI is your **music-theory brain,
 arranger, and bandmate**. You express intent in plain language ("make it
