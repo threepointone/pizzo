@@ -63,6 +63,7 @@ type DurableObjectContextLike = {
 };
 
 type SongDetailsPatch = Partial<Pick<SongMeta, "title" | "description" | "tags">>;
+type SongDetailField = keyof SongMeta["userEdited"];
 type SongSearchDocPatch = Partial<
   Pick<
     SongMeta,
@@ -261,6 +262,28 @@ export class Studio extends Think<Env, StudioState> {
               title: patch.title !== undefined ? true : song.userEdited.title,
               description: patch.description !== undefined ? true : song.userEdited.description,
               tags: patch.tags !== undefined ? true : song.userEdited.tags,
+            },
+            updatedAt: Date.now(),
+          })
+        : song,
+    );
+    this.setSongs(next);
+  }
+
+  @callable()
+  async resetSongDetails(id: string, fields: SongDetailField[]): Promise<void> {
+    const reset = new Set(fields);
+    if (reset.size === 0) return;
+    const songs = this.studio().songs;
+    const next = songs.map((song) =>
+      song.id === id
+        ? normalizeSearchMeta({
+            ...song,
+            userEdited: {
+              ...song.userEdited,
+              title: reset.has("title") ? false : song.userEdited.title,
+              description: reset.has("description") ? false : song.userEdited.description,
+              tags: reset.has("tags") ? false : song.userEdited.tags,
             },
             updatedAt: Date.now(),
           })

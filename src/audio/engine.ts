@@ -152,6 +152,10 @@ class AudioEngine {
     if (this.currentName !== MODULAR_VOICE_ID) void this.loadInstrument(this.currentName, "chords");
   }
 
+  get audioContextState(): AudioContextState {
+    return this.rawContext.state;
+  }
+
   /**
    * Load a soundfont and route it to its mixer channel. Cached per (role, name)
    * so chords + melody get distinct instances even when they share a sound,

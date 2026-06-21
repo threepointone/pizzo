@@ -36,25 +36,39 @@ export function SongList({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SongSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const shownSongs = query.trim() ? results.map((result) => result.song) : songs;
+  const [searchError, setSearchError] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const trimmed = query.trim();
+  const shownSongs = trimmed ? results.map((result) => result.song) : songs;
   const resultById = useMemo(
     () => new Map(results.map((result) => [result.song.id, result])),
     [results],
   );
 
   useEffect(() => {
-    const trimmed = query.trim();
     if (!trimmed) {
       setResults([]);
       setSearching(false);
+      setSearchError(false);
+      setHighlightedIndex(0);
       return;
     }
     let cancelled = false;
+    setSearchError(false);
     setSearching(true);
     const timer = window.setTimeout(() => {
       void onSearch(trimmed)
         .then((next) => {
-          if (!cancelled) setResults(next);
+          if (!cancelled) {
+            setResults(next);
+            setHighlightedIndex(0);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setResults([]);
+            setSearchError(true);
+          }
         })
         .finally(() => {
           if (!cancelled) setSearching(false);
@@ -64,7 +78,13 @@ export function SongList({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [onSearch, query]);
+  }, [onSearch, query, trimmed]);
+
+  useEffect(() => {
+    if (highlightedIndex >= shownSongs.length) {
+      setHighlightedIndex(Math.max(0, shownSongs.length - 1));
+    }
+  }, [highlightedIndex, shownSongs.length]);
 
   const startRename = (song: SongMeta) => {
     setEditingId(song.id);
@@ -101,6 +121,24 @@ export function SongList({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setQuery("");
+                return;
+              }
+              if (!shownSongs.length) return;
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setHighlightedIndex((i) => Math.min(shownSongs.length - 1, i + 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setHighlightedIndex((i) => Math.max(0, i - 1));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                onSelect(shownSongs[highlightedIndex].id);
+              }
+            }}
             placeholder="Search songs..."
             className="w-full rounded-lg border border-kumo-line bg-kumo-elevated py-2 pl-8 pr-8 text-sm text-kumo-default outline-none focus:ring-2 focus:ring-kumo-ring"
           />
@@ -108,7 +146,10 @@ export function SongList({
             <button
               type="button"
               aria-label="Clear song search"
-              onClick={() => setQuery("")}
+              onClick={() => {
+                setQuery("");
+                setHighlightedIndex(0);
+              }}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-kumo-inactive hover:text-kumo-default"
             >
               <XIcon size={12} />
@@ -124,13 +165,19 @@ export function SongList({
         {songs.length > 0 && searching && shownSongs.length === 0 && (
           <div className="px-2 py-4 text-xs text-kumo-inactive italic">Searching...</div>
         )}
-        {songs.length > 0 && !searching && shownSongs.length === 0 && (
+        {songs.length > 0 && searchError && (
           <div className="px-2 py-4 text-xs text-kumo-inactive italic">
-            No matches for "{query}".
+            Search failed. Try again in a moment.
           </div>
         )}
-        {shownSongs.map((song) => {
+        {songs.length > 0 && !searching && !searchError && shownSongs.length === 0 && (
+          <div className="px-2 py-4 text-xs text-kumo-inactive italic">
+            No matches for "{trimmed}".
+          </div>
+        )}
+        {shownSongs.map((song, index) => {
           const active = song.id === activeId;
+          const highlighted = trimmed && index === highlightedIndex;
           const result = resultById.get(song.id);
           const matchedFields = result?.matchedFields.filter((field) => field !== "chords");
           return (
@@ -139,6 +186,8 @@ export function SongList({
               className={`group rounded-lg px-2.5 py-2 transition-colors ${
                 active
                   ? "bg-kumo-contrast text-kumo-inverse"
+                  : highlighted
+                    ? "bg-kumo-elevated text-kumo-default"
                   : "hover:bg-kumo-elevated text-kumo-default"
               }`}
             >
@@ -160,6 +209,7 @@ export function SongList({
                     type="button"
                     aria-current={active ? "page" : undefined}
                     onClick={() => onSelect(song.id)}
+                    onMouseEnter={() => setHighlightedIndex(index)}
                     className="min-w-0 flex-1 text-left rounded-md outline-none focus-visible:ring-2 focus-visible:ring-kumo-ring"
                   >
                     <div className="text-sm font-medium truncate">{song.title}</div>
