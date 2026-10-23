@@ -18,6 +18,39 @@ body,
   margin: 0;
 }
 
+/* ===== Stage mode ==========================================================
+   A projector-friendly reconfiguration toggled with ?stage=1 (or the header
+   button). Scaling the root font-size enlarges every rem-based size (text,
+   padding, gaps) at once; the app already ships a dark theme we lean into. */
+html[data-stage="on"] {
+  font-size: 117.5%;
+}
+@media (min-width: 1680px) {
+  html[data-stage="on"] {
+    font-size: 128%;
+  }
+}
+
+/* ===== Change flash ========================================================
+   Pulses a control when the shared song document changes — so an edit made by
+   the agent visibly lands on the very control your hands would touch. */
+@keyframes pizzo-flash {
+  0% {
+    box-shadow: 0 0 0 3px rgba(246, 130, 31, 0.95);
+  }
+  100% {
+    box-shadow: 0 0 0 3px rgba(246, 130, 31, 0);
+  }
+}
+.pizzo-flash {
+  animation: pizzo-flash 0.85s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pizzo-flash {
+    animation: none;
+  }
+}
+
 /* Streamdown theme bridge — maps shadcn-style tokens to Kumo semantics */
 .sd-theme {
   --color-primary: light-dark(#e07315, #f6821f);

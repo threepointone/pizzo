@@ -24,6 +24,7 @@ import type { Patch } from "../modular/types";
 import type { ConnectionStatus } from "../client";
 import type { SongMeta } from "../../agents/studio/agent";
 import { useToast } from "./Toast";
+import { useFlash, useSongChange } from "../stage";
 
 /** Fill in fields a persisted (older) SongState may be missing. */
 function normalizeSong(next: Partial<SongState>): SongState {
@@ -426,10 +427,37 @@ function SurfaceTabs({ surface, onChange }: { surface: Surface; onChange: (s: Su
  * Mounted with a `key={songId}` by the parent, so switching songs remounts the
  * whole subtree (fresh facet connection + clean engine state).
  */
+/** Transient pill naming the last change to the shared song document. */
+function ChangeBanner({
+  change,
+}: {
+  change: { label: string; nonce: number } | null;
+}) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (!change) return;
+    setVisible(true);
+    const timer = window.setTimeout(() => setVisible(false), 2600);
+    return () => window.clearTimeout(timer);
+  }, [change]);
+  if (!change || !visible) return null;
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2">
+      <div className="flex items-center gap-2 rounded-full border border-kumo-line bg-kumo-base/95 px-4 py-1.5 shadow-lg backdrop-blur">
+        <span className="size-2 shrink-0 animate-pulse rounded-full bg-kumo-accent" />
+        <span className="font-mono text-xs text-kumo-default sm:text-sm">
+          {change.label}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function SongView({
   userId,
   songId,
   songMeta,
+  stage,
   surface,
   onSurfaceChange,
   onMeta,
@@ -442,6 +470,7 @@ export function SongView({
   userId: string;
   songId: string;
   songMeta: SongMeta;
+  stage: boolean;
   surface: Surface;
   onSurfaceChange: (s: Surface) => void;
   onMeta: (songId: string, key: string, tempo: number) => void;
@@ -475,6 +504,9 @@ export function SongView({
   const [song, setSong] = useState<SongState>(defaultSongState);
   const [isRendering, setIsRendering] = useState(false);
   const [transportNote, setTransportNote] = useState("");
+  // Surface the shared document changing — the "two hands, one song" beat.
+  const change = useSongChange(song);
+  const progressionFlash = useFlash(song.chords.join(" "));
   const [chatCollapsed, setChatCollapsed] = useState(
     () => localStorage.getItem(CHAT_SIDEBAR_COLLAPSED_KEY) === "true",
   );
@@ -871,33 +903,37 @@ export function SongView({
         />
         <SurfaceTabs surface={surface} onChange={onSurfaceChange} />
         <div className="flex min-w-0 items-center justify-end gap-2">
-          <SnapshotControls
-            snapshots={snapshots}
-            selectedId={selectedSnapshotId}
-            comparing={comparingSnapshot}
-            onSelect={setSelectedSnapshotId}
-            onCreate={createSnapshot}
-            onCompare={compareSnapshot}
-            onRestore={restoreSnapshot}
-          />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={undoLastChange}
-            disabled={!lastUndo}
-            title={lastUndo ? `Undo: ${lastUndo.label}` : "Nothing to undo"}
-          >
-            Undo
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={redoLastChange}
-            disabled={!lastRedo}
-            title={lastRedo ? `Redo: ${lastRedo.label}` : "Nothing to redo"}
-          >
-            Redo
-          </Button>
+          {!stage && (
+            <>
+              <SnapshotControls
+                snapshots={snapshots}
+                selectedId={selectedSnapshotId}
+                comparing={comparingSnapshot}
+                onSelect={setSelectedSnapshotId}
+                onCreate={createSnapshot}
+                onCompare={compareSnapshot}
+                onRestore={restoreSnapshot}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={undoLastChange}
+                disabled={!lastUndo}
+                title={lastUndo ? `Undo: ${lastUndo.label}` : "Nothing to undo"}
+              >
+                Undo
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={redoLastChange}
+                disabled={!lastRedo}
+                title={lastRedo ? `Redo: ${lastRedo.label}` : "Nothing to redo"}
+              >
+                Redo
+              </Button>
+            </>
+          )}
           <Badge variant="secondary">{statusLabel}</Badge>
           <Badge variant={audioState === "running" ? "primary" : "secondary"}>{audioLabel}</Badge>
           {transportNote && (
@@ -905,14 +941,17 @@ export function SongView({
           )}
         </div>
       </div>
-      <SongMap
-        song={song}
-        surface={surface}
-        onSurfaceChange={onSurfaceChange}
-        onUseStyleGroove={() => updateSong({ ...song, beat: { ...emptyBeat(), enabled: false } })}
-        onUseModular={() => updateSong({ ...song, instrument: MODULAR_VOICE_ID })}
-      />
+      {!stage && (
+        <SongMap
+          song={song}
+          surface={surface}
+          onSurfaceChange={onSurfaceChange}
+          onUseStyleGroove={() => updateSong({ ...song, beat: { ...emptyBeat(), enabled: false } })}
+          onUseModular={() => updateSong({ ...song, instrument: MODULAR_VOICE_ID })}
+        />
+      )}
       <div className="flex-1 flex min-h-0 relative">
+        <ChangeBanner change={change} />
         <div
           id={panelId}
           role="tabpanel"
@@ -920,7 +959,12 @@ export function SongView({
           className="flex-1 flex min-w-0"
         >
           {surface === "chords" ? (
-            <Workspace song={song} onChange={updateSong} />
+            <Workspace
+              song={song}
+              onChange={updateSong}
+              stage={stage}
+              flashProgression={progressionFlash}
+            />
           ) : surface === "beats" ? (
             <BeatMachine song={song} onChange={updateSong} />
           ) : (
@@ -957,6 +1001,7 @@ export function SongView({
           <ChatPanel
             agent={agent}
             song={song}
+            stage={stage}
             connectionStatus={connectionStatus}
             onChatSummary={updateChatSummary}
             onBeforeUserMessage={captureAiSnapshot}

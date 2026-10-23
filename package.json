@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@cloudflare/ai-chat": "latest",
+    "@ai-sdk/openai": "^3.0.74",
     "@cloudflare/kumo": "^2.5.2",
     "@cloudflare/think": "latest",
     "@elemaudio/core": "^4.0.1",

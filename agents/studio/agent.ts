@@ -1,7 +1,11 @@
 import { Think } from "@cloudflare/think";
-import { createWorkersAI } from "workers-ai-provider";
+import { createOpenAI } from "@ai-sdk/openai";
 import { callable } from "agents";
-import { defaultSongState, type SongState } from "../../src/music/song";
+import {
+  defaultSongState,
+  songStateFromProgression,
+  type SongState,
+} from "../../src/music/song";
 import {
   buildSongSearchIndex,
   loadSongSearchIndex,
@@ -85,6 +89,23 @@ function newSongId(): string {
 }
 
 /**
+ * A known-good starting point for the live demo: a warm four-chord loop with a
+ * lo-fi band so pressing Play immediately sounds finished. Deterministic — the
+ * same song every time, which is exactly what you want on stage.
+ */
+function demoSongState(): SongState {
+  const base = songStateFromProgression(["Am", "F", "C", "G"], defaultSongState);
+  return {
+    ...base,
+    tempo: 84,
+    instrument: "electric_piano_1",
+    bass: { ...base.bass, enabled: true, style: "octaves" },
+    drums: { ...base.drums, enabled: true, style: "lofi", busy: 0.4 },
+    playing: false,
+  };
+}
+
+/**
  * Per-user directory ("studio"). A Think accumulator whose own chat machinery
  * stays dormant — it just owns the song list and spawns one {@link Song} facet
  * per song (each facet has its own SongState + chat history). The browser
@@ -98,9 +119,7 @@ export class Studio extends Think<Env, StudioState> {
 
   // Never used for chat (the directory is an accumulator), but Think wants a model.
   override getModel() {
-    return createWorkersAI({ binding: this.env.AI })("@cf/moonshotai/kimi-k2.7-code", {
-      sessionAffinity: this.sessionAffinity,
-    });
+    return createOpenAI({ apiKey: this.env.OPENAI_API_KEY })("gpt-5.5");
   }
 
   // Strict registry gate: clients can only reach songs this studio spawned.
@@ -221,6 +240,31 @@ export class Studio extends Think<Env, StudioState> {
       chatSummary: "",
       key: defaultSongState.key,
       tempo: defaultSongState.tempo,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    this.setSongs([...this.studio().songs, meta]);
+    return meta;
+  }
+
+  /** Create a fresh, deterministic "Live demo" song seeded with a full band. */
+  @callable()
+  async createDemoSong(): Promise<SongMeta> {
+    const id = newSongId();
+    const facet = await this.subAgent(Song, id);
+    const state = demoSongState();
+    await facet.replaceSong(state);
+    const meta: SongMeta = {
+      id,
+      title: "Live demo",
+      description: "Warm four-chord loop with a lo-fi band — a known-good start.",
+      tags: ["demo"],
+      userEdited: { title: true, description: true, tags: true },
+      searchSummary: "",
+      searchText: "",
+      chatSummary: "",
+      key: state.key,
+      tempo: state.tempo,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };

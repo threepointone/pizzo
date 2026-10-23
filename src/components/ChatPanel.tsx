@@ -21,6 +21,20 @@ import type { ConnectionStatus } from "../client";
 
 type AgentConnection = ReturnType<typeof useAgent<SongState>>;
 
+/**
+ * Stage demo prompts — the exact narrated beats, each mapped to reliable,
+ * deterministic tools (setProgression, addBassline, applyVibe, transposeSong,
+ * reharmonize, addDrums). One click per beat so a live demo can't wander.
+ */
+const DEMO_PROMPTS: { label: string; prompt: string }[] = [
+  { label: "Dreamier in D", prompt: "Give me a dreamier progression in D major and play it." },
+  { label: "Walking bass", prompt: "Add a walking bassline." },
+  { label: "Make it lo-fi", prompt: "Give the whole thing a lo-fi vibe." },
+  { label: "Up a step", prompt: "Transpose the whole song up a step." },
+  { label: "Jazzy 7ths", prompt: "Reharmonize with jazzy seventh chords, and explain the key changes in a sentence." },
+  { label: "Funkier drums", prompt: "Switch to a funky beat with a busier groove." },
+];
+
 function ConnectionIndicator({ status }: { status: ConnectionStatus }) {
   const dot =
     status === "connected"
@@ -163,6 +177,7 @@ function summarizeToolDelta(
 export function ChatPanel({
   agent,
   song,
+  stage,
   connectionStatus,
   onChatSummary,
   onBeforeUserMessage,
@@ -172,6 +187,7 @@ export function ChatPanel({
 }: {
   agent: AgentConnection;
   song: SongState;
+  stage: boolean;
   connectionStatus: ConnectionStatus;
   onChatSummary?: (summary: string) => void;
   onBeforeUserMessage: (snapshot: SongState) => void;
@@ -210,16 +226,29 @@ export function ChatPanel({
     if (chatSummary) onChatSummary?.(chatSummary);
   }, [chatSummary, onChatSummary]);
 
+  const sendText = useCallback(
+    (raw: string) => {
+      const text = raw.trim();
+      if (!text || isStreaming || !isConnected) return;
+      onBeforeUserMessage(song);
+      sendMessage({ role: "user", parts: [{ type: "text", text }] });
+    },
+    [isStreaming, isConnected, onBeforeUserMessage, sendMessage, song],
+  );
+
   const send = useCallback(() => {
     const text = input.trim();
     if (!text || isStreaming) return;
-    onBeforeUserMessage(song);
     setInput("");
-    sendMessage({ role: "user", parts: [{ type: "text", text }] });
-  }, [input, isStreaming, onBeforeUserMessage, sendMessage, song]);
+    sendText(text);
+  }, [input, isStreaming, sendText]);
 
   return (
-    <aside className="w-[380px] shrink-0 flex flex-col h-full border-l border-kumo-line bg-kumo-base">
+    <aside
+      className={`${
+        stage ? "w-[440px]" : "w-[380px]"
+      } shrink-0 flex flex-col h-full border-l border-kumo-line bg-kumo-base`}
+    >
       <div className="px-4 py-3 border-b border-kumo-line flex items-center justify-between">
         <div className="flex items-center gap-2">
           <RobotIcon size={16} weight="bold" className="text-kumo-accent" />
@@ -363,6 +392,9 @@ export function ChatPanel({
                         <Text size="xs" variant="secondary" bold>
                           {isRunning ? `Working: ${summary}` : summary}
                         </Text>
+                        <code className="rounded bg-kumo-elevated px-1.5 py-0.5 font-mono text-[10px] text-kumo-inactive">
+                          {toolName}
+                        </code>
                         {isDone && <Badge variant="secondary">Done</Badge>}
                         {isError && <Badge variant="destructive">Error</Badge>}
                       </div>
@@ -408,6 +440,27 @@ export function ChatPanel({
 
         <div ref={endRef} />
       </div>
+
+      {stage && (
+        <div className="border-t border-kumo-line px-4 py-2.5">
+          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-kumo-inactive">
+            Demo beats
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {DEMO_PROMPTS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => sendText(p.prompt)}
+                disabled={!isConnected || isStreaming}
+                className="rounded-full border border-kumo-line bg-kumo-elevated px-3 py-1.5 text-xs font-medium text-kumo-default hover:border-kumo-accent hover:text-kumo-accent disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <form
         onSubmit={(e) => {

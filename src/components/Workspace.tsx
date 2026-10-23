@@ -234,10 +234,12 @@ function ChordStrip({
   chords,
   onRemove,
   onClear,
+  stage,
 }: {
   chords: string[];
   onRemove: (index: number) => void;
   onClear: () => void;
+  stage?: boolean;
 }) {
   return (
     <div className="px-5 py-4">
@@ -260,17 +262,21 @@ function ChordStrip({
         {chords.map((chord, i) => (
           <div
             key={`${chord}-${i}`}
-            className="group flex items-center gap-1.5 pl-3 pr-2 py-2 rounded-xl bg-kumo-contrast text-kumo-inverse"
+            className={`group flex items-center rounded-xl bg-kumo-contrast text-kumo-inverse ${
+              stage ? "gap-2.5 pl-5 pr-4 py-3.5" : "gap-1.5 pl-3 pr-2 py-2"
+            }`}
           >
             <span className="text-xs opacity-60 tabular-nums">{i + 1}</span>
-            <span className="font-semibold">{chord}</span>
+            <span className={stage ? "text-3xl font-bold leading-none" : "font-semibold"}>
+              {chord}
+            </span>
             <button
               type="button"
               aria-label={`Remove ${chord}`}
               onClick={() => onRemove(i)}
               className="opacity-50 hover:opacity-100 transition-opacity"
             >
-              <XIcon size={14} weight="bold" />
+              <XIcon size={stage ? 18 : 14} weight="bold" />
             </button>
           </div>
         ))}
@@ -1416,9 +1422,13 @@ function TheoryNudge({ chords, songKey }: { chords: string[]; songKey: string })
 export function Workspace({
   song,
   onChange,
+  stage,
+  flashProgression,
 }: {
   song: SongState;
   onChange: (next: SongState) => void;
+  stage?: boolean;
+  flashProgression?: boolean;
 }) {
   const [exportingWav, setExportingWav] = useState(false);
   const [activePanel, setActivePanel] = useState<FocusPanel | null>(null);
@@ -1523,7 +1533,11 @@ export function Workspace({
 
       <DirectionPanel song={song} onChange={onChange} onSetProgression={setChords} />
 
-      <section className="mx-5 my-4 shrink-0 overflow-hidden rounded-2xl border border-kumo-line bg-kumo-base">
+      <section
+        className={`mx-5 my-4 shrink-0 overflow-hidden rounded-2xl border border-kumo-line bg-kumo-base ${
+          flashProgression ? "pizzo-flash" : ""
+        }`}
+      >
         <div className="border-b border-kumo-line px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -1543,7 +1557,12 @@ export function Workspace({
             </div>
           </div>
         </div>
-        <ChordStrip chords={chords} onRemove={removeChord} onClear={() => setChords([])} />
+        <ChordStrip
+          chords={chords}
+          onRemove={removeChord}
+          onClear={() => setChords([])}
+          stage={stage}
+        />
         <TrackLanes
           song={laneSong}
           playing={song.playing && !arrangementOn}

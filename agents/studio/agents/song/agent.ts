@@ -1,5 +1,5 @@
 import { Think } from "@cloudflare/think";
-import { createWorkersAI } from "workers-ai-provider";
+import { createOpenAI } from "@ai-sdk/openai";
 import { tool } from "ai";
 import { z } from "zod";
 import {
@@ -163,9 +163,15 @@ export class Song extends Think<Env, SongState> {
   override initialState = defaultSongState;
 
   override getModel() {
-    return createWorkersAI({ binding: this.env.AI })("@cf/moonshotai/kimi-k2.7-code", {
-      sessionAffinity: this.sessionAffinity,
-    });
+    return createOpenAI({ apiKey: this.env.OPENAI_API_KEY })("gpt-5.5");
+  }
+
+  // gpt-5.5 reasons internally but only streams a visible summary when asked.
+  // Request it so the chat can render the "Thinking" trace live.
+  override beforeTurn() {
+    return {
+      providerOptions: { openai: { reasoningSummary: "auto" } },
+    };
   }
 
   /** Read this song's full state (used by the Studio to duplicate a song). */

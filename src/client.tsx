@@ -13,6 +13,7 @@ import {
 import { SongList } from "./components/SongList";
 import { SongView } from "./components/SongView";
 import { useToast } from "./components/Toast";
+import { useStageMode } from "./stage";
 import { engine } from "./audio/engine";
 import type { SongSearchResult } from "./music/search";
 import type { SongMeta, StudioState } from "../agents/studio/agent";
@@ -33,19 +34,13 @@ function getSessionId(): string {
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
-function ModeToggle() {
-  const [mode, setMode] = useState(() => localStorage.getItem("theme") || "light");
-  useEffect(() => {
-    document.documentElement.setAttribute("data-mode", mode);
-    document.documentElement.style.colorScheme = mode;
-    localStorage.setItem("theme", mode);
-  }, [mode]);
+function ModeToggle({ mode, onToggle }: { mode: string; onToggle: () => void }) {
   return (
     <Button
       variant="ghost"
       shape="square"
       aria-label="Toggle theme"
-      onClick={() => setMode((m) => (m === "light" ? "dark" : "light"))}
+      onClick={onToggle}
       icon={mode === "light" ? <MoonIcon size={16} /> : <SunIcon size={16} />}
     />
   );
@@ -284,6 +279,17 @@ function GlobalSearch({
 export function App() {
   const { toast } = useToast();
   const userId = getSessionId();
+  const { stage, toggle: toggleStage } = useStageMode();
+  const [mode, setMode] = useState(() => localStorage.getItem("theme") || "light");
+  useEffect(() => {
+    document.documentElement.setAttribute("data-mode", mode);
+    document.documentElement.style.colorScheme = mode;
+    localStorage.setItem("theme", mode);
+  }, [mode]);
+  // Stage mode reads better dark on a projector.
+  useEffect(() => {
+    if (stage) setMode("dark");
+  }, [stage]);
   const [songs, setSongs] = useState<SongMeta[]>([]);
   const [activeSongId, setActiveSongId] = useState<string | null>(() =>
     localStorage.getItem(ACTIVE_SONG_KEY),
@@ -319,7 +325,7 @@ export function App() {
   useEffect(() => {
     if (gotState && songs.length === 0 && !seededRef.current) {
       seededRef.current = true;
-      void studio.call("createSong").catch(() => {
+      void studio.call("createDemoSong").catch(() => {
         seededRef.current = false;
         toast("Couldn't create your first song.", "error");
       });
@@ -381,6 +387,15 @@ export function App() {
       if (meta?.id) setActiveSongId(meta.id);
     } catch {
       toast("Couldn't create a new song.", "error");
+    }
+  }, [studio, toast]);
+
+  const handleCreateDemo = useCallback(async () => {
+    try {
+      const meta = (await studio.call("createDemoSong")) as SongMeta;
+      if (meta?.id) setActiveSongId(meta.id);
+    } catch {
+      toast("Couldn't create the demo song.", "error");
     }
   }, [studio, toast]);
 
@@ -490,6 +505,8 @@ export function App() {
   );
 
   const activeSong = songs.find((song) => song.id === activeSongId) ?? null;
+  // Stage mode keeps the song list out of the way.
+  const sidebarCollapsed = stage || songSidebarCollapsed;
 
   return (
     <div className="flex flex-col h-screen bg-kumo-elevated">
@@ -500,12 +517,37 @@ export function App() {
           <Badge variant="secondary">AI studio</Badge>
         </div>
         <div className="flex items-center gap-3">
-          <GlobalSearch
-            activeId={activeSongId}
-            onSelect={setActiveSongId}
-            onSearch={handleSearchSongs}
+          {!stage && (
+            <GlobalSearch
+              activeId={activeSongId}
+              onSelect={setActiveSongId}
+              onSearch={handleSearchSongs}
+            />
+          )}
+          {stage && (
+            <Button
+              variant="secondary"
+              size="sm"
+              aria-label="Fresh demo song"
+              title="Spin up a fresh, known-good demo song"
+              onClick={() => void handleCreateDemo()}
+            >
+              New demo
+            </Button>
+          )}
+          <Button
+            variant={stage ? "primary" : "ghost"}
+            size="sm"
+            aria-label="Toggle stage mode"
+            title="Stage mode — larger, projector-friendly layout"
+            onClick={toggleStage}
+          >
+            Stage
+          </Button>
+          <ModeToggle
+            mode={mode}
+            onToggle={() => setMode((m) => (m === "light" ? "dark" : "light"))}
           />
-          <ModeToggle />
           <Button
             variant="ghost"
             shape="square"
@@ -518,7 +560,7 @@ export function App() {
       </header>
 
       <div className="flex-1 flex min-h-0">
-        {songSidebarCollapsed ? (
+        {sidebarCollapsed ? (
           <aside
             className="w-12 shrink-0 flex flex-col items-center gap-2 border-r border-kumo-line bg-kumo-base px-1.5 py-3"
             aria-label="Collapsed song sidebar"
@@ -561,6 +603,7 @@ export function App() {
             userId={userId}
             songId={activeSongId}
             songMeta={activeSong}
+            stage={stage}
             surface={surface}
             onSurfaceChange={setSurface}
             onMeta={handleMeta}
